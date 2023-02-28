@@ -99,6 +99,19 @@ config X86_SGX_KVM
 
 	  If unsure, say N.
 
+config KVM_INTEL_EXPORTED_EPT
+	bool "export EPT to be used by other modules (e.g. iommufd)"
+	depends on KVM_INTEL
+	select HAVE_KVM_EXPORTED_TDP
+	select HAVE_KVM_MMU_PRESENT_HIGH if X86_64
+	help
+	  Intel EPT is architecturally guaranteed of compatible to stage 2
+	  page tables in Intel IOMMU.
+
+	  Enable this feature to allow Intel EPT to be exported and used
+	  directly as stage 2 page tables in Intel IOMMU.
+
+
 config KVM_AMD
 	tristate "KVM for AMD processors support"
 	depends on KVM && (CPU_SUP_AMD || CPU_SUP_HYGON)
