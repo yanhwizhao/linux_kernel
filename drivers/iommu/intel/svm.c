@@ -628,6 +628,7 @@ static irqreturn_t prq_event_thread(int irq, void *d)
 	int head, tail, handled;
 	struct pci_dev *pdev;
 	u64 address;
+	bool bad_req = false;
 
 	/*
 	 * Clear PPR bit before reading head/tail registers, to ensure that
@@ -642,30 +643,29 @@ static irqreturn_t prq_event_thread(int irq, void *d)
 		req = &iommu->prq[head / sizeof(*req)];
 		address = (u64)req->addr << VTD_PAGE_SHIFT;
 
-		if (unlikely(!req->pasid_present)) {
-			pr_err("IOMMU: %s: Page request without PASID\n",
+		if (unlikely(!req->pasid_present))
+			pr_info("IOMMU: %s: Page request without PASID\n",
 			       iommu->name);
-bad_req:
-			handle_bad_prq_event(iommu, req, QI_RESP_INVALID);
-			goto prq_advance;
-		}
 
 		if (unlikely(!is_canonical_address(address))) {
 			pr_err("IOMMU: %s: Address is not canonical\n",
 			       iommu->name);
-			goto bad_req;
+			bad_req = true;
+			goto prq_advance;
 		}
 
 		if (unlikely(req->pm_req && (req->rd_req | req->wr_req))) {
 			pr_err("IOMMU: %s: Page request in Privilege Mode\n",
 			       iommu->name);
-			goto bad_req;
+			bad_req = true;
+			goto prq_advance;
 		}
 
 		if (unlikely(req->exe_req && req->rd_req)) {
 			pr_err("IOMMU: %s: Execution request not supported\n",
 			       iommu->name);
-			goto bad_req;
+			bad_req = true;
+			goto prq_advance;
 		}
 
 		/* Drop Stop Marker message. No need for a response. */
@@ -679,8 +679,10 @@ bad_req:
 		 * If prq is to be handled outside iommu driver via receiver of
 		 * the fault notifiers, we skip the page response here.
 		 */
-		if (!pdev)
-			goto bad_req;
+		if (!pdev) {
+			bad_req = true;
+			goto prq_advance;
+		}
 
 		if (intel_svm_prq_report(iommu, &pdev->dev, req))
 			handle_bad_prq_event(iommu, req, QI_RESP_INVALID);
@@ -688,8 +690,14 @@ bad_req:
 			trace_prq_report(iommu, &pdev->dev, req->qw_0, req->qw_1,
 					 req->priv_data[0], req->priv_data[1],
 					 iommu->prq_seq_number++);
+
 		pci_dev_put(pdev);
+
 prq_advance:
+		if (bad_req) {
+			handle_bad_prq_event(iommu, req, QI_RESP_INVALID);
+			bad_req = false;
+		}
 		head = (head + sizeof(*req)) & PRQ_RING_MASK;
 	}
 
@@ -747,12 +755,7 @@ int intel_svm_page_response(struct device *dev,
 	private_present = prm->flags & IOMMU_FAULT_PAGE_REQUEST_PRIV_DATA;
 	last_page = prm->flags & IOMMU_FAULT_PAGE_REQUEST_LAST_PAGE;
 
-	if (!pasid_present) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (prm->pasid == 0 || prm->pasid >= PASID_MAX) {
+	if (prm->pasid >= PASID_MAX) {
 		ret = -EINVAL;
 		goto out;
 	}
