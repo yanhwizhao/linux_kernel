@@ -4926,6 +4926,13 @@ static void reset_tdp_shadow_zero_bits_mask(struct kvm_mmu *context)
 					    reserved_hpa_bits(), false,
 					    max_huge_page_level);
 
+	if (IS_ENABLED(CONFIG_HAVE_KVM_MMU_PRESENT_HIGH)) {
+		for (i = PT64_ROOT_MAX_LEVEL; --i >= 0;) {
+			shadow_zero_check->rsvd_bits_mask[0][i] |= rsvd_bits(11, 11);
+			shadow_zero_check->rsvd_bits_mask[1][i] |= rsvd_bits(11, 11);
+		}
+	}
+
 	if (!shadow_me_mask)
 		return;
 

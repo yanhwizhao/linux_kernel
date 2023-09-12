@@ -64,6 +64,9 @@ static u64 generation_mmio_spte_mask(u64 gen)
 	WARN_ON_ONCE(gen & ~MMIO_SPTE_GEN_MASK);
 
 	mask = (gen << MMIO_SPTE_GEN_LOW_SHIFT) & MMIO_SPTE_GEN_LOW_MASK;
+#ifdef CONFIG_HAVE_KVM_MMU_PRESENT_HIGH
+	mask |= (gen << MMIO_SPTE_GEN_MID_SHIFT) & MMIO_SPTE_GEN_MID_MASK;
+#endif
 	mask |= (gen << MMIO_SPTE_GEN_HIGH_SHIFT) & MMIO_SPTE_GEN_HIGH_MASK;
 	return mask;
 }

@@ -7,13 +7,20 @@
 #include "mmu_internal.h"
 
 /*
- * A MMU present SPTE is backed by actual memory and may or may not be present
- * in hardware.  E.g. MMIO SPTEs are not considered present.  Use bit 11, as it
- * is ignored by all flavors of SPTEs and checking a low bit often generates
- * better code than for a high bit, e.g. 56+.  MMU present checks are pervasive
- * enough that the improved code generation is noticeable in KVM's footprint.
- */
+* A MMU present SPTE is backed by actual memory and may or may not be present
+* in hardware.  E.g. MMIO SPTEs are not considered present.  Use bit 11, as it
+* is ignored by all flavors of SPTEs and checking a low bit often generates
+* better code than for a high bit, e.g. 56+.  MMU present checks are pervasive
+* enough that the improved code generation is noticeable in KVM's footprint.
+* However, sometimes it's desired to have present bit in high bits. e.g.
+* if a KVM TDP is exported  to IOMMU side, bit 11 could be a reserved bit in
+* IOMMU side. Add a config to decide MMU present bit is at bit 11 or bit 59.
+*/
+#ifdef CONFIG_HAVE_KVM_MMU_PRESENT_HIGH
+#define SPTE_MMU_PRESENT_MASK		BIT_ULL(59)
+#else
 #define SPTE_MMU_PRESENT_MASK		BIT_ULL(11)
+#endif
 
 /*
  * TDP SPTES (more specifically, EPT SPTEs) may not have A/D bits, and may also
@@ -111,19 +118,66 @@ static_assert(!(EPT_SPTE_MMU_WRITABLE & SHADOW_ACC_TRACK_SAVED_MASK));
  * checking for MMIO spte cache hits.
  */
 
+#ifdef CONFIG_HAVE_KVM_MMU_PRESENT_HIGH
+
+#define MMIO_SPTE_GEN_LOW_START		3
+#define MMIO_SPTE_GEN_LOW_END		11
+#define MMIO_SPTE_GEN_MID_START		52
+#define MMIO_SPTE_GEN_MID_END		58
+#define MMIO_SPTE_GEN_HIGH_START	60
+#define MMIO_SPTE_GEN_HIGH_END		62
+#define MMIO_SPTE_GEN_LOW_MASK		GENMASK_ULL(MMIO_SPTE_GEN_LOW_END, \
+						    MMIO_SPTE_GEN_LOW_START)
+#define MMIO_SPTE_GEN_MID_MASK		GENMASK_ULL(MMIO_SPTE_GEN_MID_END, \
+						    MMIO_SPTE_GEN_MID_START)
+#define MMIO_SPTE_GEN_HIGH_MASK		GENMASK_ULL(MMIO_SPTE_GEN_HIGH_END, \
+						    MMIO_SPTE_GEN_HIGH_START)
+static_assert(!(SPTE_MMU_PRESENT_MASK &
+		(MMIO_SPTE_GEN_LOW_MASK | MMIO_SPTE_GEN_MID_MASK |
+		 MMIO_SPTE_GEN_HIGH_MASK)));
+/*
+ * The SPTE MMIO mask must NOT overlap the MMIO generation bits or the
+ * MMU-present bit.  The generation obviously co-exists with the magic MMIO
+ * mask/value, and MMIO SPTEs are considered !MMU-present.
+ *
+ * The SPTE MMIO mask is allowed to use hardware "present" bits (i.e. all EPT
+ * RWX bits), all physical address bits (legal PA bits are used for "fast" MMIO
+ * and so they're off-limits for generation; additional checks ensure the mask
+ * doesn't overlap legal PA bits), and bit 63 (carved out for future usage).
+ */
+#define SPTE_MMIO_ALLOWED_MASK (BIT_ULL(63) | GENMASK_ULL(51, 12) | GENMASK_ULL(2, 0))
+static_assert(!(SPTE_MMIO_ALLOWED_MASK &
+		(SPTE_MMU_PRESENT_MASK | MMIO_SPTE_GEN_LOW_MASK | MMIO_SPTE_GEN_MID_MASK |
+		 MMIO_SPTE_GEN_HIGH_MASK)));
+
+#define MMIO_SPTE_GEN_LOW_BITS		(MMIO_SPTE_GEN_LOW_END - MMIO_SPTE_GEN_LOW_START + 1)
+#define MMIO_SPTE_GEN_MID_BITS		(MMIO_SPTE_GEN_MID_END - MMIO_SPTE_GEN_MID_START + 1)
+#define MMIO_SPTE_GEN_HIGH_BITS		(MMIO_SPTE_GEN_HIGH_END - MMIO_SPTE_GEN_HIGH_START + 1)
+
+/* remember to adjust the comment above as well if you change these */
+static_assert(MMIO_SPTE_GEN_LOW_BITS == 9 && MMIO_SPTE_GEN_MID_BITS == 7 &&
+	      MMIO_SPTE_GEN_HIGH_BITS == 3);
+
+#define MMIO_SPTE_GEN_LOW_SHIFT		(MMIO_SPTE_GEN_LOW_START - 0)
+#define MMIO_SPTE_GEN_MID_SHIFT		(MMIO_SPTE_GEN_MID_START - MMIO_SPTE_GEN_LOW_BITS)
+#define MMIO_SPTE_GEN_HIGH_SHIFT	(MMIO_SPTE_GEN_HIGH_START - MMIO_SPTE_GEN_MID_BITS - \
+					MMIO_SPTE_GEN_LOW_BITS)
+
+#define MMIO_SPTE_GEN_MASK		GENMASK_ULL(MMIO_SPTE_GEN_LOW_BITS + \
+					MMIO_SPTE_GEN_MID_BITS + MMIO_SPTE_GEN_HIGH_BITS - 1, 0)
+
+#else /* !CONFIG_HAVE_KVM_MMU_PRESENT_HIGH */
+
 #define MMIO_SPTE_GEN_LOW_START		3
 #define MMIO_SPTE_GEN_LOW_END		10
-
 #define MMIO_SPTE_GEN_HIGH_START	52
 #define MMIO_SPTE_GEN_HIGH_END		62
-
 #define MMIO_SPTE_GEN_LOW_MASK		GENMASK_ULL(MMIO_SPTE_GEN_LOW_END, \
 						    MMIO_SPTE_GEN_LOW_START)
 #define MMIO_SPTE_GEN_HIGH_MASK		GENMASK_ULL(MMIO_SPTE_GEN_HIGH_END, \
 						    MMIO_SPTE_GEN_HIGH_START)
 static_assert(!(SPTE_MMU_PRESENT_MASK &
 		(MMIO_SPTE_GEN_LOW_MASK | MMIO_SPTE_GEN_HIGH_MASK)));
-
 /*
  * The SPTE MMIO mask must NOT overlap the MMIO generation bits or the
  * MMU-present bit.  The generation obviously co-exists with the magic MMIO
@@ -148,6 +202,8 @@ static_assert(MMIO_SPTE_GEN_LOW_BITS == 8 && MMIO_SPTE_GEN_HIGH_BITS == 11);
 #define MMIO_SPTE_GEN_HIGH_SHIFT	(MMIO_SPTE_GEN_HIGH_START - MMIO_SPTE_GEN_LOW_BITS)
 
 #define MMIO_SPTE_GEN_MASK		GENMASK_ULL(MMIO_SPTE_GEN_LOW_BITS + MMIO_SPTE_GEN_HIGH_BITS - 1, 0)
+
+#endif /* #ifdef CONFIG_HAVE_KVM_MMU_PRESENT_HIGH */
 
 extern u64 __read_mostly shadow_host_writable_mask;
 extern u64 __read_mostly shadow_mmu_writable_mask;
@@ -465,6 +521,9 @@ static inline u64 get_mmio_spte_generation(u64 spte)
 	u64 gen;
 
 	gen = (spte & MMIO_SPTE_GEN_LOW_MASK) >> MMIO_SPTE_GEN_LOW_SHIFT;
+#ifdef CONFIG_HAVE_KVM_MMU_PRESENT_HIGH
+	gen |= (spte & MMIO_SPTE_GEN_MID_MASK) >> MMIO_SPTE_GEN_MID_SHIFT;
+#endif
 	gen |= (spte & MMIO_SPTE_GEN_HIGH_MASK) >> MMIO_SPTE_GEN_HIGH_SHIFT;
 	return gen;
 }
