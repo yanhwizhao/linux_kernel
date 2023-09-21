@@ -530,7 +530,8 @@ static inline u64 get_mmio_spte_generation(u64 spte)
 
 bool spte_has_volatile_bits(u64 spte);
 
-bool make_spte(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp,
+bool make_spte(struct kvm_vcpu *vcpu,
+	       struct kvm_mmu_common *mmu_common, struct kvm_mmu_page *sp,
 	       const struct kvm_memory_slot *slot,
 	       unsigned int pte_access, gfn_t gfn, kvm_pfn_t pfn,
 	       u64 old_spte, bool prefetch, bool can_unsync,

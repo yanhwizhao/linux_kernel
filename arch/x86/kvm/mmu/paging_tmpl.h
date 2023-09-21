@@ -648,7 +648,7 @@ static int FNAME(fetch)(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault,
 	if (FNAME(gpte_changed)(vcpu, gw, top_level))
 		goto out_gpte_changed;
 
-	if (WARN_ON_ONCE(!VALID_PAGE(vcpu->arch.mmu->root.hpa)))
+	if (WARN_ON_ONCE(!VALID_PAGE(vcpu->arch.mmu->common.root.hpa)))
 		goto out_gpte_changed;
 
 	/*
@@ -657,7 +657,7 @@ static int FNAME(fetch)(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault,
 	 * loading a dummy root and handling the resulting page fault, e.g. if
 	 * userspace create a memslot in the interim.
 	 */
-	if (unlikely(kvm_mmu_is_dummy_root(vcpu->arch.mmu->root.hpa))) {
+	if (unlikely(kvm_mmu_is_dummy_root(vcpu->arch.mmu->common.root.hpa))) {
 		kvm_make_request(KVM_REQ_MMU_FREE_OBSOLETE_ROOTS, vcpu);
 		goto out_gpte_changed;
 	}
@@ -960,9 +960,8 @@ static int FNAME(sync_spte)(struct kvm_vcpu *vcpu, struct kvm_mmu_page *sp, int 
 	spte = *sptep;
 	host_writable = spte & shadow_host_writable_mask;
 	slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);
-	make_spte(vcpu, sp, slot, pte_access, gfn,
-		  spte_to_pfn(spte), spte, true, false,
-		  host_writable, &spte);
+	make_spte(vcpu, &vcpu->arch.mmu->common, sp, slot, pte_access,
+		  gfn, spte_to_pfn(spte), spte, true, false, host_writable, &spte);
 
 	return mmu_spte_update(sptep, spte);
 }

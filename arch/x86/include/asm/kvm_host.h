@@ -437,12 +437,25 @@ struct kvm_mmu_root_info {
 struct kvm_mmu_page;
 struct kvm_page_fault;
 
+struct kvm_mmu_common {
+	struct kvm_mmu_root_info root;
+	union kvm_mmu_page_role root_role;
+
+	/*
+	 * check zero bits on shadow page table entries, these
+	 * bits include not only hardware reserved bits but also
+	 * the bits spte never used.
+	 */
+	struct rsvd_bits_validate shadow_zero_check;
+};
+
 /*
  * x86 supports 4 paging modes (5-level 64-bit, 4-level 64-bit, 3-level 32-bit,
  * and 2-level 32-bit).  The kvm_mmu structure abstracts the details of the
  * current mmu mode.
  */
 struct kvm_mmu {
+	struct kvm_mmu_common common;
 	unsigned long (*get_guest_pgd)(struct kvm_vcpu *vcpu);
 	u64 (*get_pdptr)(struct kvm_vcpu *vcpu, int index);
 	int (*page_fault)(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault);
@@ -453,9 +466,7 @@ struct kvm_mmu {
 			    struct x86_exception *exception);
 	int (*sync_spte)(struct kvm_vcpu *vcpu,
 			 struct kvm_mmu_page *sp, int i);
-	struct kvm_mmu_root_info root;
 	union kvm_cpu_role cpu_role;
-	union kvm_mmu_page_role root_role;
 
 	/*
 	* The pkru_mask indicates if protection key checks are needed.  It
@@ -477,13 +488,6 @@ struct kvm_mmu {
 	u64 *pae_root;
 	u64 *pml4_root;
 	u64 *pml5_root;
-
-	/*
-	 * check zero bits on shadow page table entries, these
-	 * bits include not only hardware reserved bits but also
-	 * the bits spte never used.
-	 */
-	struct rsvd_bits_validate shadow_zero_check;
 
 	struct rsvd_bits_validate guest_rsvd_check;
 

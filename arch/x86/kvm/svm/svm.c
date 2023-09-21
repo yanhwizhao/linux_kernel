@@ -3900,7 +3900,7 @@ static void svm_flush_tlb_asid(struct kvm_vcpu *vcpu)
 
 static void svm_flush_tlb_current(struct kvm_vcpu *vcpu)
 {
-	hpa_t root_tdp = vcpu->arch.mmu->root.hpa;
+	hpa_t root_tdp = vcpu->arch.mmu->common.root.hpa;
 
 	/*
 	 * When running on Hyper-V with EnlightenedNptTlb enabled, explicitly

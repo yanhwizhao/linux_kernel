@@ -299,7 +299,7 @@ static inline int kvm_mmu_do_page_fault(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa,
 	};
 	int r;
 
-	if (vcpu->arch.mmu->root_role.direct) {
+	if (vcpu->arch.mmu->common.root_role.direct) {
 		fault.gfn = fault.addr >> PAGE_SHIFT;
 		fault.slot = kvm_vcpu_gfn_to_memslot(vcpu, fault.gfn);
 	}
