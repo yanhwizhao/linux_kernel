@@ -949,7 +949,9 @@ void kvm_tdp_mmu_invalidate_all_roots(struct kvm *kvm)
  * Installs a last-level SPTE to handle a TDP page fault.
  * (NPT/EPT violation/misconfiguration)
  */
-static int tdp_mmu_map_handle_target_level(struct kvm_vcpu *vcpu,
+static int tdp_mmu_map_handle_target_level(struct kvm *kvm,
+					  struct kvm_vcpu *vcpu,
+					  struct kvm_mmu_common *mmu_common,
 					  struct kvm_page_fault *fault,
 					  struct tdp_iter *iter)
 {
@@ -958,24 +960,26 @@ static int tdp_mmu_map_handle_target_level(struct kvm_vcpu *vcpu,
 	int ret = RET_PF_FIXED;
 	bool wrprot = false;
 
+	WARN_ON(!kvm);
+
 	if (WARN_ON_ONCE(sp->role.level != fault->goal_level))
 		return RET_PF_RETRY;
 
 	if (unlikely(!fault->slot))
 		new_spte = make_mmio_spte(vcpu->kvm, vcpu, iter->gfn, ACC_ALL);
 	else
-		wrprot = make_spte(vcpu->kvm, vcpu, &vcpu->arch.mmu->common, sp, fault->slot,
+		wrprot = make_spte(kvm, vcpu, mmu_common, sp, fault->slot,
 				   ACC_ALL, iter->gfn, fault->pfn, iter->old_spte,
 				   fault->prefetch, true, fault->map_writable,
 				   &new_spte);
 
 	if (new_spte == iter->old_spte)
 		ret = RET_PF_SPURIOUS;
-	else if (tdp_mmu_set_spte_atomic(vcpu->kvm, iter, new_spte))
+	else if (tdp_mmu_set_spte_atomic(kvm, iter, new_spte))
 		return RET_PF_RETRY;
 	else if (is_shadow_present_pte(iter->old_spte) &&
 		 !is_last_spte(iter->old_spte, iter->level))
-		kvm_flush_remote_tlbs_gfn(vcpu->kvm, iter->gfn, iter->level);
+		kvm_flush_remote_tlbs_gfn(kvm, iter->gfn, iter->level);
 
 	/*
 	 * If the page fault was caused by a write but the page is write
@@ -989,10 +993,13 @@ static int tdp_mmu_map_handle_target_level(struct kvm_vcpu *vcpu,
 
 	/* If a MMIO SPTE is installed, the MMIO will need to be emulated. */
 	if (unlikely(is_mmio_spte(new_spte))) {
-		vcpu->stat.pf_mmio_spte_created++;
-		trace_mark_mmio_spte(rcu_dereference(iter->sptep), iter->gfn,
-				     new_spte);
-		ret = RET_PF_EMULATE;
+		/* if without vcpu, no mmio spte should be installed */
+		if (!WARN_ON(!vcpu)) {
+			vcpu->stat.pf_mmio_spte_created++;
+			trace_mark_mmio_spte(rcu_dereference(iter->sptep), iter->gfn,
+					new_spte);
+			ret = RET_PF_EMULATE;
+		}
 	} else {
 		trace_kvm_mmu_set_spte(iter->level, iter->gfn,
 				       rcu_dereference(iter->sptep));
@@ -1114,7 +1121,8 @@ int kvm_tdp_mmu_map(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 	goto retry;
 
 map_target_level:
-	ret = tdp_mmu_map_handle_target_level(vcpu, fault, &iter);
+	ret = tdp_mmu_map_handle_target_level(vcpu->kvm, vcpu, &vcpu->arch.mmu->common,
+					      fault, &iter);
 
 retry:
 	rcu_read_unlock();
