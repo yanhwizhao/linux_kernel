@@ -716,7 +716,7 @@ static int FNAME(fetch)(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault,
 	 * are being shadowed by KVM, i.e. allocating a new shadow page may
 	 * affect the allowed hugepage size.
 	 */
-	kvm_mmu_hugepage_adjust(vcpu, fault);
+	kvm_mmu_hugepage_adjust(vcpu->kvm, fault);
 
 	trace_kvm_mmu_spte_requested(fault);
 
