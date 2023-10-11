@@ -71,9 +71,10 @@ static u64 generation_mmio_spte_mask(u64 gen)
 	return mask;
 }
 
-u64 make_mmio_spte(struct kvm_vcpu *vcpu, u64 gfn, unsigned int access)
+u64 make_mmio_spte(struct kvm *kvm, struct kvm_vcpu *vcpu, u64 gfn, unsigned int access)
 {
-	u64 gen = kvm_vcpu_memslots(vcpu)->generation & MMIO_SPTE_GEN_MASK;
+	struct kvm_memslots *memslots = vcpu ? kvm_vcpu_memslots(vcpu) : kvm_memslots(kvm);
+	u64 gen = memslots->generation & MMIO_SPTE_GEN_MASK;
 	u64 spte = generation_mmio_spte_mask(gen);
 	u64 gpa = gfn << PAGE_SHIFT;
 
