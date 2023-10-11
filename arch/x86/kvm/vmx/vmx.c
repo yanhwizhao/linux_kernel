@@ -7544,6 +7544,17 @@ free_vpid:
 	return err;
 }
 
+static int vmx_flush_remote_tlbs_range(struct kvm *kvm, gfn_t gfn, gfn_t nr_pages)
+{
+	kvm_make_all_cpus_request(kvm, KVM_REQ_TLB_FLUSH);
+	return 0;
+}
+
+static int vmx_flush_remote_tlbs(struct kvm *kvm)
+{
+	return vmx_flush_remote_tlbs_range(kvm, 0, -1ULL);
+}
+
 #define L1TF_MSG_SMT "L1TF CPU bug present and SMT on, data leak possible. See CVE-2018-3646 and https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/l1tf.html for details.\n"
 #define L1TF_MSG_L1D "L1TF CPU bug present and virtualization mitigation disabled, data leak possible. See CVE-2018-3646 and https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/l1tf.html for details.\n"
 
@@ -8527,6 +8538,11 @@ static __init int hardware_setup(void)
 	    && enable_ept) {
 		vmx_x86_ops.flush_remote_tlbs = hv_flush_remote_tlbs;
 		vmx_x86_ops.flush_remote_tlbs_range = hv_flush_remote_tlbs_range;
+	}
+#else
+	if (enable_ept) {
+		vmx_x86_ops.flush_remote_tlbs = vmx_flush_remote_tlbs;
+		vmx_x86_ops.flush_remote_tlbs_range = vmx_flush_remote_tlbs_range;
 	}
 #endif
 
