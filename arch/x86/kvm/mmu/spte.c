@@ -138,7 +138,7 @@ bool spte_has_volatile_bits(u64 spte)
 	return false;
 }
 
-bool make_spte(struct kvm_vcpu *vcpu,
+bool make_spte(struct kvm *kvm, struct kvm_vcpu *vcpu,
 	       struct kvm_mmu_common *mmu_common, struct kvm_mmu_page *sp,
 	       const struct kvm_memory_slot *slot,
 	       unsigned int pte_access, gfn_t gfn, kvm_pfn_t pfn,
@@ -179,7 +179,7 @@ bool make_spte(struct kvm_vcpu *vcpu,
 	 * just to optimize a mode that is anything but performance critical.
 	 */
 	if (level > PG_LEVEL_4K && (pte_access & ACC_EXEC_MASK) &&
-	    is_nx_huge_page_enabled(vcpu->kvm)) {
+	    is_nx_huge_page_enabled(kvm)) {
 		pte_access &= ~ACC_EXEC_MASK;
 	}
 
@@ -194,9 +194,15 @@ bool make_spte(struct kvm_vcpu *vcpu,
 	if (level > PG_LEVEL_4K)
 		spte |= PT_PAGE_SIZE_MASK;
 
-	if (shadow_memtype_mask)
-		spte |= static_call(kvm_x86_get_mt_mask)(vcpu, gfn,
+	if (shadow_memtype_mask) {
+		if (vcpu)
+			spte |= static_call(kvm_x86_get_mt_mask)(vcpu, gfn,
 							 kvm_is_mmio_pfn(pfn));
+		else
+			spte |= static_call(kvm_x86_get_default_mt_mask)(kvm,
+							kvm_is_mmio_pfn(pfn));
+	}
+
 	if (host_writable)
 		spte |= shadow_host_writable_mask;
 	else
@@ -225,7 +231,7 @@ bool make_spte(struct kvm_vcpu *vcpu,
 		 * e.g. it's write-tracked (upper-level SPs) or has one or more
 		 * shadow pages and unsync'ing pages is not allowed.
 		 */
-		if (mmu_try_to_unsync_pages(vcpu->kvm, slot, gfn, can_unsync, prefetch)) {
+		if (mmu_try_to_unsync_pages(kvm, slot, gfn, can_unsync, prefetch)) {
 			wrprot = true;
 			pte_access &= ~ACC_WRITE_MASK;
 			spte &= ~(PT_WRITABLE_MASK | shadow_mmu_writable_mask);
@@ -246,7 +252,7 @@ out:
 	if ((spte & PT_WRITABLE_MASK) && kvm_slot_dirty_track_enabled(slot)) {
 		/* Enforced by kvm_mmu_hugepage_adjust. */
 		WARN_ON_ONCE(level > PG_LEVEL_4K);
-		mark_page_dirty_in_slot(vcpu->kvm, slot, gfn);
+		mark_page_dirty_in_slot(kvm, slot, gfn);
 	}
 
 	*new_spte = spte;
