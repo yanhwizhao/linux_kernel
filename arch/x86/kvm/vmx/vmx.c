@@ -7547,6 +7547,9 @@ free_vpid:
 static int vmx_flush_remote_tlbs_range(struct kvm *kvm, gfn_t gfn, gfn_t nr_pages)
 {
 	kvm_make_all_cpus_request(kvm, KVM_REQ_TLB_FLUSH);
+#if IS_ENABLED(CONFIG_KVM_INTEL_EXPORTED_EPT)
+	kvm_tdp_fd_flush_notify(kvm, gfn, nr_pages);
+#endif
 	return 0;
 }
 
