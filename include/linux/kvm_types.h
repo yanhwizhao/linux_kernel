@@ -123,4 +123,16 @@ struct kvm_vcpu_stat_generic {
 
 #define KVM_STATS_NAME_SIZE	48
 
+/**
+ * enum kvm_exported_tdp_type - Type defined across platforms for TDP exported
+ *                              by KVM.
+ *
+ * @KVM_TDP_TYPE_EPT: The TDP is of type EPT running on Intel platform.
+ *
+ * Currently, @KVM_TDP_TYPE_EPT is the only supported type for TDPs exported by
+ * KVM.
+ */
+enum kvm_exported_tdp_type {
+	KVM_TDP_TYPE_EPT = 1,
+};
 #endif /* __KVM_TYPES_H__ */
