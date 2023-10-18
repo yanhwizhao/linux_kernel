@@ -5200,7 +5200,7 @@ static inline int kvm_mmu_get_tdp_level(int maxphyaddr)
 }
 
 static union kvm_mmu_page_role
-kvm_calc_tdp_mmu_root_page_role(struct kvm_vcpu *vcpu,
+kvm_calc_tdp_mmu_root_page_role(int maxphyaddr,
 				union kvm_cpu_role cpu_role)
 {
 	union kvm_mmu_page_role role = {0};
@@ -5211,7 +5211,7 @@ kvm_calc_tdp_mmu_root_page_role(struct kvm_vcpu *vcpu,
 	role.smm = cpu_role.base.smm;
 	role.guest_mode = cpu_role.base.guest_mode;
 	role.ad_disabled = !kvm_ad_enabled();
-	role.level = kvm_mmu_get_tdp_level(cpuid_maxphyaddr(vcpu));
+	role.level = kvm_mmu_get_tdp_level(maxphyaddr);
 	role.direct = true;
 	role.has_4_byte_gpte = false;
 
@@ -5222,7 +5222,9 @@ static void init_kvm_tdp_mmu(struct kvm_vcpu *vcpu,
 			     union kvm_cpu_role cpu_role)
 {
 	struct kvm_mmu *context = &vcpu->arch.root_mmu;
-	union kvm_mmu_page_role root_role = kvm_calc_tdp_mmu_root_page_role(vcpu, cpu_role);
+	union kvm_mmu_page_role root_role;
+
+	root_role = kvm_calc_tdp_mmu_root_page_role(cpuid_maxphyaddr(vcpu), cpu_role);
 
 	if (cpu_role.as_u64 == context->cpu_role.as_u64 &&
 	    root_role.word == context->common.root_role.word)
