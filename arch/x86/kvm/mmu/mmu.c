@@ -5186,14 +5186,14 @@ void __kvm_mmu_refresh_passthrough_bits(struct kvm_vcpu *vcpu,
 	reset_guest_paging_metadata(vcpu, mmu);
 }
 
-static inline int kvm_mmu_get_tdp_level(struct kvm_vcpu *vcpu)
+static inline int kvm_mmu_get_tdp_level(int maxphyaddr)
 {
 	/* tdp_root_level is architecture forced level, use it if nonzero */
 	if (tdp_root_level)
 		return tdp_root_level;
 
 	/* Use 5-level TDP if and only if it's useful/necessary. */
-	if (max_tdp_level == 5 && cpuid_maxphyaddr(vcpu) <= 48)
+	if (max_tdp_level == 5 && maxphyaddr <= 48)
 		return 4;
 
 	return max_tdp_level;
@@ -5211,7 +5211,7 @@ kvm_calc_tdp_mmu_root_page_role(struct kvm_vcpu *vcpu,
 	role.smm = cpu_role.base.smm;
 	role.guest_mode = cpu_role.base.guest_mode;
 	role.ad_disabled = !kvm_ad_enabled();
-	role.level = kvm_mmu_get_tdp_level(vcpu);
+	role.level = kvm_mmu_get_tdp_level(cpuid_maxphyaddr(vcpu));
 	role.direct = true;
 	role.has_4_byte_gpte = false;
 
@@ -5310,7 +5310,7 @@ void kvm_init_shadow_npt_mmu(struct kvm_vcpu *vcpu, unsigned long cr0,
 	WARN_ON_ONCE(cpu_role.base.direct);
 
 	root_role = cpu_role.base;
-	root_role.level = kvm_mmu_get_tdp_level(vcpu);
+	root_role.level = kvm_mmu_get_tdp_level(cpuid_maxphyaddr(vcpu));
 	if (root_role.level == PT64_ROOT_5LEVEL &&
 	    cpu_role.base.level == PT64_ROOT_4LEVEL)
 		root_role.passthrough = 1;
@@ -6012,7 +6012,8 @@ static int __kvm_mmu_create(struct kvm_vcpu *vcpu, struct kvm_mmu *mmu)
 	 * other exception is for shadowing L1's 32-bit or PAE NPT on 64-bit
 	 * KVM; that horror is handled on-demand by mmu_alloc_special_roots().
 	 */
-	if (tdp_enabled && kvm_mmu_get_tdp_level(vcpu) > PT32E_ROOT_LEVEL)
+	if (tdp_enabled &&
+	    kvm_mmu_get_tdp_level(cpuid_maxphyaddr(vcpu)) > PT32E_ROOT_LEVEL)
 		return 0;
 
 	page = alloc_page(GFP_KERNEL_ACCOUNT | __GFP_DMA32);
