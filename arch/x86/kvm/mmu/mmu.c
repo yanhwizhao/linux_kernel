@@ -4186,7 +4186,7 @@ static int handle_mmio_page_fault(struct kvm_vcpu *vcpu, u64 addr, bool direct)
 	return RET_PF_RETRY;
 }
 
-static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
+static bool page_fault_handle_page_track(struct kvm *kvm,
 					 struct kvm_page_fault *fault)
 {
 	if (unlikely(fault->rsvd))
@@ -4199,7 +4199,7 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	 * guest is writing the page which is write tracked which can
 	 * not be fixed by page fault handler.
 	 */
-	if (kvm_gfn_is_write_tracked(vcpu->kvm, fault->slot, fault->gfn))
+	if (kvm_gfn_is_write_tracked(kvm, fault->slot, fault->gfn))
 		return true;
 
 	return false;
@@ -4378,7 +4378,7 @@ static int direct_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault
 	if (WARN_ON_ONCE(kvm_mmu_is_dummy_root(vcpu->arch.mmu->common.root.hpa)))
 		return RET_PF_RETRY;
 
-	if (page_fault_handle_page_track(vcpu, fault))
+	if (page_fault_handle_page_track(vcpu->kvm, fault))
 		return RET_PF_EMULATE;
 
 	r = fast_page_fault(vcpu, fault);
@@ -4458,7 +4458,7 @@ static int kvm_tdp_mmu_page_fault(struct kvm_vcpu *vcpu,
 {
 	int r;
 
-	if (page_fault_handle_page_track(vcpu, fault))
+	if (page_fault_handle_page_track(vcpu->kvm, fault))
 		return RET_PF_EMULATE;
 
 	r = fast_page_fault(vcpu, fault);
