@@ -62,10 +62,41 @@ static bool kvm_domain_enforce_cache_coherency(struct iommu_domain *domain)
 	return true;
 }
 
+static void domain_flush_iotlb_psi(struct dmar_domain *domain,
+				   unsigned long iova, unsigned long size)
+{
+	struct iommu_domain_info *info;
+	unsigned long i;
+
+	if (!IS_ALIGNED(size, VTD_PAGE_SIZE) ||
+	    !IS_ALIGNED(iova, VTD_PAGE_SIZE)) {
+		pr_err("Invalid KVM domain invalidation: iova=0x%lx, size=0x%lx\n",
+		       iova, size);
+		return;
+	}
+
+	xa_for_each(&domain->iommu_array, i, info)
+		iommu_flush_iotlb_psi(info->iommu, domain,
+				      iova >> VTD_PAGE_SHIFT,
+				      size >> VTD_PAGE_SHIFT, 1, 0);
+}
+
+static void kvm_domain_cache_invalidate(struct iommu_domain *domain,
+					unsigned long iova, unsigned long size)
+{
+	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
+
+	if (iova == 0 && size == -1UL)
+		intel_flush_iotlb_all(domain);
+	else
+		domain_flush_iotlb_psi(dmar_domain, iova, size);
+}
+
 static const struct iommu_domain_ops intel_kvm_domain_ops = {
 	.attach_dev		= intel_iommu_attach_device,
 	.free			= intel_iommu_domain_free,
 	.enforce_cache_coherency = kvm_domain_enforce_cache_coherency,
+	.cache_invalidate_kvm	= kvm_domain_cache_invalidate,
 };
 
 struct iommu_domain *
