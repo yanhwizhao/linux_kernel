@@ -1056,4 +1056,9 @@ static inline int width_to_agaw(int width)
 	return DIV_ROUND_UP(width - 30, LEVEL_STRIDE);
 }
 
+#ifdef CONFIG_INTEL_IOMMU_KVM
+struct iommu_domain *
+intel_iommu_domain_alloc_kvm(struct device *dev, u32 flags, const void *data);
+#endif
+
 #endif

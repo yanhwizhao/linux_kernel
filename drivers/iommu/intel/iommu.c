@@ -375,6 +375,15 @@ static inline int domain_type_is_si(struct dmar_domain *domain)
 	return domain->domain.type == IOMMU_DOMAIN_IDENTITY;
 }
 
+static inline int domain_type_is_kvm(struct dmar_domain *domain)
+{
+#ifdef CONFIG_INTEL_IOMMU_KVM
+	return domain->domain.type == IOMMU_DOMAIN_KVM;
+#else
+	return false;
+#endif
+}
+
 static inline int domain_pfn_supported(struct dmar_domain *domain,
 				       unsigned long pfn)
 {
@@ -1735,6 +1744,9 @@ static bool first_level_by_default(unsigned int type)
 	if (intel_cap_flts_sanity() ^ intel_cap_slts_sanity())
 		return intel_cap_flts_sanity();
 
+	if (type == IOMMU_DOMAIN_KVM)
+		return false;
+
 	/* Both levels are available, decide it based on domain type */
 	return type != IOMMU_DOMAIN_UNMANAGED;
 }
@@ -1826,7 +1838,8 @@ void domain_detach_iommu(struct dmar_domain *domain, struct intel_iommu *iommu)
 
 static void domain_exit(struct dmar_domain *domain)
 {
-	if (domain->pgd) {
+	/* pgd of kvm domain is managed by KVM */
+	if (!domain_type_is_kvm(domain) && (domain->pgd)) {
 		LIST_HEAD(freelist);
 
 		domain_unmap(domain, 0, DOMAIN_MAX_PFN(domain->gaw), &freelist);
@@ -4892,6 +4905,9 @@ const struct iommu_ops intel_iommu_ops = {
 	.hw_info		= intel_iommu_hw_info,
 	.domain_alloc		= intel_iommu_domain_alloc,
 	.domain_alloc_user	= intel_iommu_domain_alloc_user,
+#ifdef CONFIG_INTEL_IOMMU_KVM
+	.domain_alloc_kvm	= intel_iommu_domain_alloc_kvm,
+#endif
 	.probe_device		= intel_iommu_probe_device,
 	.probe_finalize		= intel_iommu_probe_finalize,
 	.release_device		= intel_iommu_release_device,
