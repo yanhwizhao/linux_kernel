@@ -1059,6 +1059,13 @@ static inline int width_to_agaw(int width)
 #ifdef CONFIG_INTEL_IOMMU_KVM
 struct iommu_domain *
 intel_iommu_domain_alloc_kvm(struct device *dev, u32 flags, const void *data);
+int prepare_kvm_domain_attach(struct dmar_domain *domain, struct intel_iommu *iommu);
+#else
+static inline int prepare_kvm_domain_attach(struct dmar_domain *domain,
+					    struct intel_iommu *iommu)
+{
+	return 0;
+}
 #endif
 
 #endif

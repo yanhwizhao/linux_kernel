@@ -32,6 +32,14 @@ static bool is_iommu_cap_compatible_to_kvm_domain(struct dmar_domain *domain,
 	return true;
 }
 
+int prepare_kvm_domain_attach(struct dmar_domain *domain, struct intel_iommu *iommu)
+{
+	if (is_iommu_cap_compatible_to_kvm_domain(domain, iommu))
+		return 0;
+
+	return -EINVAL;
+}
+
 /*
  * Cache coherency is always enforced in KVM domain.
  * IOMMU hardware caps will be checked to allow the cache coherency before
@@ -43,6 +51,7 @@ static bool kvm_domain_enforce_cache_coherency(struct iommu_domain *domain)
 }
 
 static const struct iommu_domain_ops intel_kvm_domain_ops = {
+	.attach_dev		= intel_iommu_attach_device,
 	.free			= intel_iommu_domain_free,
 	.enforce_cache_coherency = kvm_domain_enforce_cache_coherency,
 };

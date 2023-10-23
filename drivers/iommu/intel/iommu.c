@@ -552,6 +552,13 @@ static unsigned long domain_super_pgsize_bitmap(struct dmar_domain *domain)
 /* Some capabilities may be different across iommus */
 void domain_update_iommu_cap(struct dmar_domain *domain)
 {
+	/*
+	 * No need to adjust iommu cap of kvm domain.
+	 * Instead, iommu will be checked in pre-attach phase.
+	 */
+	if (domain_type_is_kvm(domain))
+		return;
+
 	domain_update_iommu_coherency(domain);
 	domain->iommu_superpage = domain_update_iommu_superpage(domain, NULL);
 
@@ -4104,6 +4111,9 @@ int prepare_domain_attach_device(struct iommu_domain *domain,
 	if (!iommu)
 		return -ENODEV;
 
+	if (domain_type_is_kvm(dmar_domain))
+		return prepare_kvm_domain_attach(dmar_domain, iommu);
+
 	if (dmar_domain->force_snooping && !ecap_sc_support(iommu->ecap))
 		return -EINVAL;
 
@@ -4117,6 +4127,7 @@ int prepare_domain_attach_device(struct iommu_domain *domain,
 
 	if (dmar_domain->max_addr > (1LL << addr_width))
 		return -EINVAL;
+
 	dmar_domain->gaw = addr_width;
 
 	/*
