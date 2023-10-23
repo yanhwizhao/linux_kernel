@@ -636,6 +636,9 @@ struct iommu_ops {
  *                         forward a driver specific error code to user space.
  *                         Both the driver data structure and the error code
  *                         must be defined in include/uapi/linux/iommufd.h
+ * @cache_invalidate_kvm: Synchronously flush hardware TLBs for KVM managed
+ *                        stage 2 IO page tables.
+ *                        The @domain must be IOMMU_DOMAIN_KVM.
  * @iova_to_phys: translate iova to physical address
  * @enforce_cache_coherency: Prevent any kind of DMA from bypassing IOMMU_CACHE,
  *                           including no-snoop TLPs on PCIe or other platform
@@ -665,6 +668,8 @@ struct iommu_domain_ops {
 	int (*cache_invalidate_user)(struct iommu_domain *domain,
 				     struct iommu_user_data_array *array,
 				     u32 *error_code);
+	void (*cache_invalidate_kvm)(struct iommu_domain *domain,
+				     unsigned long iova, unsigned long size);
 
 	phys_addr_t (*iova_to_phys)(struct iommu_domain *domain,
 				    dma_addr_t iova);
