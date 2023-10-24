@@ -6,6 +6,89 @@
 #include "../iommu-priv.h"
 #include "iommufd_private.h"
 
+static int iommufd_kvmtdp_fault(void *data, struct mm_struct *mm,
+				unsigned long addr, u32 perm)
+{
+	struct iommufd_hw_pagetable *hwpt = data;
+	struct kvm_tdp_fault_type fault_type = {0};
+	unsigned long gfn = addr >> PAGE_SHIFT;
+	struct kvm_tdp_fd *tdp_fd;
+	int ret;
+
+	if (!hwpt || !hwpt_is_kvm(hwpt))
+		return IOMMU_PAGE_RESP_INVALID;
+
+	tdp_fd = to_hwpt_kvm(hwpt)->context;
+	if (!tdp_fd->ops->fault)
+		return IOMMU_PAGE_RESP_INVALID;
+
+	fault_type.read = !!(perm & IOMMU_FAULT_PERM_READ);
+	fault_type.write = !!(perm & IOMMU_FAULT_PERM_WRITE);
+	fault_type.exec = !!(perm & IOMMU_FAULT_PERM_EXEC);
+
+	ret = tdp_fd->ops->fault(tdp_fd, mm, gfn, fault_type);
+	return ret ? IOMMU_PAGE_RESP_FAILURE : IOMMU_PAGE_RESP_SUCCESS;
+}
+
+static int iommufd_kvmtdp_complete_group(struct device *dev, struct iopf_fault *iopf,
+				    enum iommu_page_response_code status)
+{
+	struct iommu_page_response resp = {
+		.pasid			= iopf->fault.prm.pasid,
+		.grpid			= iopf->fault.prm.grpid,
+		.code			= status,
+	};
+
+	if ((iopf->fault.prm.flags & IOMMU_FAULT_PAGE_REQUEST_PASID_VALID) &&
+	    (iopf->fault.prm.flags & IOMMU_FAULT_PAGE_RESPONSE_NEEDS_PASID))
+		resp.flags = IOMMU_PAGE_RESP_PASID_VALID;
+
+	return iommu_page_response(dev, &resp);
+}
+
+static void iommufd_kvmtdp_handle_iopf(struct work_struct *work)
+{
+	struct iopf_fault *iopf;
+	struct iopf_group *group;
+	enum iommu_page_response_code status = IOMMU_PAGE_RESP_SUCCESS;
+	struct iommu_domain *domain;
+	void *fault_data;
+	int ret;
+
+	group = container_of(work, struct iopf_group, work);
+	domain = group->domain;
+	fault_data = domain->fault_data;
+
+	list_for_each_entry(iopf, &group->faults, list) {
+		/*
+		 * For the moment, errors are sticky: don't handle subsequent
+		 * faults in the group if there is an error.
+		 */
+		if (status != IOMMU_PAGE_RESP_SUCCESS)
+			break;
+
+		status = iommufd_kvmtdp_fault(fault_data, domain->mm,
+					      iopf->fault.prm.addr,
+					      iopf->fault.prm.perm);
+	}
+
+	ret = iommufd_kvmtdp_complete_group(group->dev, &group->last_fault, status);
+
+	iopf_free_group(group);
+
+}
+
+static int iommufd_kvmtdp_iopf_handler(struct iopf_group *group)
+{
+	struct iommu_fault_param *fault_param = group->dev->iommu->fault_param;
+
+	INIT_WORK(&group->work, iommufd_kvmtdp_handle_iopf);
+	if (!queue_work(fault_param->queue->wq, &group->work))
+		return -EBUSY;
+
+	return 0;
+}
+
 static void iommufd_kvmtdp_invalidate(void *data,
 				      unsigned long start, unsigned long size)
 {
@@ -168,6 +251,10 @@ iommufd_hwpt_kvm_alloc(struct iommufd_ctx *ictx,
 		hwpt->domain = NULL;
 		goto out_abort;
 	}
+
+	hwpt->domain->mm = current->mm;
+	hwpt->domain->iopf_handler = iommufd_kvmtdp_iopf_handler;
+	hwpt->domain->fault_data = hwpt;
 
 	rc = kvmtdp_register(tdp_fd, hwpt);
 	if (rc)
