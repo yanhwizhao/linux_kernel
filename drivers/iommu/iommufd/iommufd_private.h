@@ -432,6 +432,14 @@ static inline bool iommufd_selftest_is_mock_dev(struct device *dev)
 #endif
 
 struct iommu_hwpt_kvm_info;
+#ifdef CONFIG_IOMMUFD_KVM_HWPT
+struct iommufd_hwpt_kvm *
+iommufd_hwpt_kvm_alloc(struct iommufd_ctx *ictx,
+		       struct iommufd_device *idev, u32 flags,
+		       const struct iommu_hwpt_kvm_info *kvm_data);
+void iommufd_hwpt_kvm_abort(struct iommufd_object *obj);
+void iommufd_hwpt_kvm_destroy(struct iommufd_object *obj);
+#else
 static inline struct iommufd_hwpt_kvm *
 iommufd_hwpt_kvm_alloc(struct iommufd_ctx *ictx,
 		       struct iommufd_device *idev, u32 flags,
@@ -447,5 +455,6 @@ static inline void iommufd_hwpt_kvm_abort(struct iommufd_object *obj)
 static inline void iommufd_hwpt_kvm_destroy(struct iommufd_object *obj)
 {
 }
+#endif
 
 #endif

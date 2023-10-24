@@ -32,6 +32,16 @@ config IOMMUFD_VFIO_CONTAINER
 
 	  Unless testing IOMMUFD, say N here.
 
+config IOMMUFD_KVM_HWPT
+	bool "Supports KVM managed HW page tables"
+	default n
+	help
+	  Selecting this option will allow IOMMUFD to create IOMMU stage 2
+	  page tables whose paging structure and mappings are managed by
+	  KVM MMU. IOMMUFD serves as proxy between KVM and IOMMU driver to
+	  allow IOMMU driver to get paging structure meta data and cache
+	  invalidate notifications from KVM.
+
 config IOMMUFD_TEST
 	bool "IOMMU Userspace API Test support"
 	depends on DEBUG_KERNEL
