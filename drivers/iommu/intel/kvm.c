@@ -32,6 +32,18 @@ static bool is_iommu_cap_compatible_to_kvm_domain(struct dmar_domain *domain,
 	return true;
 }
 
+static int check_tdp_reserved_bits(const struct kvm_exported_tdp_meta_vmx *tdp)
+{
+	int i;
+
+	for (i = PT64_ROOT_MAX_LEVEL; --i >= 0;) {
+		if (!(tdp->rsvd_bits_mask[0][i] & BIT(11)) ||
+		    !(tdp->rsvd_bits_mask[1][i] & BIT(11)))
+			return -EFAULT;
+	}
+	return 0;
+}
+
 int prepare_kvm_domain_attach(struct dmar_domain *domain, struct intel_iommu *iommu)
 {
 	if (is_iommu_cap_compatible_to_kvm_domain(domain, iommu))
@@ -87,6 +99,11 @@ intel_iommu_domain_alloc_kvm(struct device *dev, u32 flags, const void *data)
 
 	if (tdp->level != 4 && tdp->level != 5) {
 		pr_err("Unsupported KVM TDP level %d in IOMMU\n", tdp->level);
+		return ERR_PTR(-EOPNOTSUPP);
+	}
+
+	if (check_tdp_reserved_bits(tdp)) {
+		pr_err("Reserved bits incompatible between KVM and IOMMU\n");
 		return ERR_PTR(-EOPNOTSUPP);
 	}
 
