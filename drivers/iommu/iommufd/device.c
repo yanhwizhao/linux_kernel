@@ -381,10 +381,26 @@ int iommufd_hw_pagetable_attach(struct iommufd_hw_pagetable *hwpt,
 			goto err_unresv;
 		idev->igroup->hwpt = hwpt;
 	}
+	if (hwpt_is_kvm(hwpt)) {
+		/*
+		 * Feature IOPF requires ats is enabled which is true only
+		 * after device is attached to iommu domain.
+		 * So enable dev feature IOPF after iommu_attach_group().
+		 * -EBUSY will be returned if feature IOPF is already on.
+		 */
+		rc = iommu_dev_enable_feature(idev->dev, IOMMU_DEV_FEAT_IOPF);
+		if (rc && rc != -EBUSY)
+			goto err_detach;
+	}
 	refcount_inc(&hwpt->obj.users);
 	list_add_tail(&idev->group_item, &idev->igroup->device_list);
 	mutex_unlock(&idev->igroup->lock);
 	return 0;
+err_detach:
+	if (list_empty(&idev->igroup->device_list)) {
+		iommu_detach_group(hwpt->domain, idev->igroup->group);
+		idev->igroup->hwpt = NULL;
+	}
 err_unresv:
 	if (hwpt_is_paging(hwpt))
 		iopt_remove_reserved_iova(&to_hwpt_paging(hwpt)->ioas->iopt,
@@ -408,6 +424,8 @@ iommufd_hw_pagetable_detach(struct iommufd_device *idev)
 	if (hwpt_is_paging(hwpt))
 		iopt_remove_reserved_iova(&to_hwpt_paging(hwpt)->ioas->iopt,
 					  idev->dev);
+	if (hwpt_is_kvm(hwpt))
+		iommu_dev_disable_feature(idev->dev, IOMMU_DEV_FEAT_IOPF);
 	mutex_unlock(&idev->igroup->lock);
 
 	/* Caller must destroy hwpt */
