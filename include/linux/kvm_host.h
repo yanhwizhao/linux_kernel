@@ -2366,5 +2366,8 @@ static inline int kvm_arch_fault_exported_tdp(struct kvm_exported_tdp *tdp,
 }
 #endif /* __KVM_HAVE_ARCH_EXPORTED_TDP */
 
+void kvm_tdp_fd_flush_notify(struct kvm *kvm, unsigned long gfn, unsigned long npages);
+
 #endif /* CONFIG_HAVE_KVM_EXPORTED_TDP */
+
 #endif

@@ -304,3 +304,41 @@ void kvm_tdp_fd_put(struct kvm_tdp_fd *tdp_fd)
 	fput(tdp_fd->file);
 }
 EXPORT_SYMBOL_GPL(kvm_tdp_fd_put);
+
+static void kvm_tdp_fd_flush(struct kvm_exported_tdp *tdp, unsigned long gfn,
+			     unsigned long npages)
+{
+#define INVALID_NPAGES (-1UL)
+	bool all = (gfn == 0) && (npages == INVALID_NPAGES);
+	struct kvm_tdp_importer *importer;
+	unsigned long start, size;
+
+	if (all) {
+		start = 0;
+		size = -1UL;
+	} else {
+		start = gfn << PAGE_SHIFT;
+		size = npages << PAGE_SHIFT;
+	}
+
+	spin_lock(&tdp->importer_lock);
+
+	list_for_each_entry(importer, &tdp->importers, node) {
+		if (!importer->ops->invalidate)
+			continue;
+
+		importer->ops->invalidate(importer->data, start, size);
+	}
+	spin_unlock(&tdp->importer_lock);
+}
+
+void kvm_tdp_fd_flush_notify(struct kvm *kvm, unsigned long gfn, unsigned long npages)
+{
+	struct kvm_exported_tdp *tdp;
+
+	spin_lock(&kvm->exported_tdplist_lock);
+	list_for_each_entry(tdp, &kvm->exported_tdp_list, list_node)
+		kvm_tdp_fd_flush(tdp, gfn, npages);
+	spin_unlock(&kvm->exported_tdplist_lock);
+}
+EXPORT_SYMBOL_GPL(kvm_tdp_fd_flush_notify);
