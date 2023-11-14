@@ -13,6 +13,13 @@ static inline int is_tdp_fd_file(struct file *file);
 static const struct file_operations kvm_tdp_fd_fops;
 static const struct kvm_exported_tdp_ops exported_tdp_ops;
 
+struct kvm_tdp_importer {
+	struct kvm_tdp_importer_ops *ops;
+	void *data;
+	struct list_head node;
+};
+static void kvm_tdp_unregister_all_importers(struct kvm_exported_tdp *tdp);
+
 int kvm_create_tdp_fd(struct kvm *kvm, struct kvm_create_tdp_fd *ct)
 {
 	struct kvm_exported_tdp *tdp;
@@ -55,6 +62,9 @@ int kvm_create_tdp_fd(struct kvm *kvm, struct kvm_create_tdp_fd *ct)
 	ret = kvm_arch_exported_tdp_init(kvm, tdp);
 	if (ret)
 		goto out;
+
+	INIT_LIST_HEAD(&tdp->importers);
+	spin_lock_init(&tdp->importer_lock);
 
 	tdp_fd->file = anon_inode_getfile("tdp_fd", &kvm_tdp_fd_fops,
 					tdp_fd, O_RDWR | O_CLOEXEC);
@@ -107,6 +117,7 @@ static int kvm_tdp_fd_release(struct inode *inode, struct file *file)
 	list_del(&tdp->list_node);
 	spin_unlock(&tdp->kvm->exported_tdplist_lock);
 
+	kvm_tdp_unregister_all_importers(tdp);
 	kvm_arch_exported_tdp_destroy(tdp);
 	kvm_put_kvm(tdp->kvm);
 	kfree(tdp);
@@ -141,12 +152,67 @@ static inline int is_tdp_fd_file(struct file *file)
 static int kvm_tdp_register_importer(struct kvm_tdp_fd *tdp_fd,
 				     struct kvm_tdp_importer_ops *ops, void *data)
 {
-	return -EOPNOTSUPP;
+	struct kvm_tdp_importer *importer, *tmp;
+	struct kvm_exported_tdp *tdp;
+
+	if (!tdp_fd || !tdp_fd->priv || !ops)
+		return -EINVAL;
+
+	tdp = tdp_fd->priv;
+	importer = kzalloc(sizeof(*importer), GFP_KERNEL);
+	if (!importer)
+		return -ENOMEM;
+
+	spin_lock(&tdp->importer_lock);
+	list_for_each_entry(tmp, &tdp->importers, node) {
+		if (tmp->ops != ops)
+			continue;
+
+		kfree(importer);
+		spin_unlock(&tdp->importer_lock);
+		return -EBUSY;
+	}
+
+	importer->ops = ops;
+	importer->data = data;
+	list_add(&importer->node, &tdp->importers);
+
+	spin_unlock(&tdp->importer_lock);
+
+	return 0;
 }
 
 static void kvm_tdp_unregister_importer(struct kvm_tdp_fd *tdp_fd,
 					struct kvm_tdp_importer_ops *ops)
 {
+	struct kvm_tdp_importer *importer, *n;
+	struct kvm_exported_tdp *tdp;
+
+	if (!tdp_fd || !tdp_fd->priv)
+		return;
+
+	tdp = tdp_fd->priv;
+	spin_lock(&tdp->importer_lock);
+	list_for_each_entry_safe(importer, n, &tdp->importers, node) {
+		if (importer->ops != ops)
+			continue;
+
+		list_del(&importer->node);
+		kfree(importer);
+	}
+	spin_unlock(&tdp->importer_lock);
+}
+
+static void kvm_tdp_unregister_all_importers(struct kvm_exported_tdp *tdp)
+{
+	struct kvm_tdp_importer *importer, *n;
+
+	spin_lock(&tdp->importer_lock);
+	list_for_each_entry_safe(importer, n, &tdp->importers, node) {
+		list_del(&importer->node);
+		kfree(importer);
+	}
+	spin_unlock(&tdp->importer_lock);
 }
 
 static void *kvm_tdp_get_metadata(struct kvm_tdp_fd *tdp_fd)

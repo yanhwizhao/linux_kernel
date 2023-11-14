@@ -2334,6 +2334,11 @@ struct kvm_exported_tdp {
 
 	struct kvm *kvm;
 	u32 as_id;
+
+	/* protect importers list */
+	spinlock_t importer_lock;
+	struct list_head importers;
+
 	/* head at kvm->exported_tdp_list */
 	struct list_head list_node;
 };
