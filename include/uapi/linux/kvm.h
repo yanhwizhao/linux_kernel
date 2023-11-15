@@ -1582,6 +1582,9 @@ struct kvm_s390_ucas_mapping {
 #define KVM_GET_DEVICE_ATTR	  _IOW(KVMIO,  0xe2, struct kvm_device_attr)
 #define KVM_HAS_DEVICE_ATTR	  _IOW(KVMIO,  0xe3, struct kvm_device_attr)
 
+/* ioctl for vm fd to create tdp fd */
+#define KVM_CREATE_TDP_FD	  _IOWR(KVMIO,  0xe4, struct kvm_create_tdp_fd)
+
 /*
  * ioctls for vcpu fds
  */
@@ -2267,4 +2270,20 @@ struct kvm_s390_zpci_op {
 /* flags for kvm_s390_zpci_op->u.reg_aen.flags */
 #define KVM_S390_ZPCIOP_REGAEN_HOST    (1 << 0)
 
+/**
+ * struct kvm_create_tdp_fd - VM ioctl(KVM_CREATE_TDP_FD)
+ * Create a TDP fd object for a TDP exported by KVM.
+ *
+ * @as_id: in: Address space ID for this TDP.
+ * @mode:  in: Mode of this tdp.
+ *             Reserved for future usage. Currently, this field must be 0.
+ * @fd:    out: fd of TDP fd object for a TDP exported by KVM.
+ * @pad:   in: Reserved as 0.
+ */
+struct kvm_create_tdp_fd {
+	__u32 as_id;
+	__u32 mode;
+	__u32 fd;
+	__u32 pad;
+};
 #endif /* __LINUX_KVM_H */

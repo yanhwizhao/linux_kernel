@@ -61,6 +61,7 @@
 #include "async_pf.h"
 #include "kvm_mm.h"
 #include "vfio.h"
+#include "tdp_fd.h"
 
 #include <trace/events/ipi.h>
 
@@ -4973,6 +4974,24 @@ static long kvm_vm_ioctl(struct file *filp,
 	case KVM_GET_STATS_FD:
 		r = kvm_vm_ioctl_get_stats_fd(kvm);
 		break;
+	case KVM_CREATE_TDP_FD: {
+		struct kvm_create_tdp_fd ct;
+
+		r = -EFAULT;
+		if (copy_from_user(&ct, argp, sizeof(ct)))
+			goto out;
+
+		r = kvm_create_tdp_fd(kvm, &ct);
+		if (r)
+			goto out;
+
+		r = -EFAULT;
+		if (copy_to_user(argp, &ct, sizeof(ct)))
+			goto out;
+
+		r = 0;
+		break;
+	}
 	default:
 		r = kvm_arch_vm_ioctl(filp, ioctl, arg);
 	}
