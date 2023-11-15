@@ -44,6 +44,7 @@
 
 #include <asm/kvm_host.h>
 #include <linux/kvm_dirty_ring.h>
+#include <linux/kvm_tdp_fd.h>
 
 #ifndef KVM_MAX_VCPU_IDS
 #define KVM_MAX_VCPU_IDS KVM_MAX_VCPUS
@@ -808,6 +809,11 @@ struct kvm {
 	struct notifier_block pm_notifier;
 #endif
 	char stats_id[KVM_STATS_NAME_SIZE];
+
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+	struct list_head exported_tdp_list;
+	spinlock_t exported_tdplist_lock;
+#endif
 };
 
 #define kvm_err(fmt, ...) \
@@ -2318,4 +2324,16 @@ static inline void kvm_account_pgtable_pages(void *virt, int nr)
 /* Max number of entries allowed for each kvm dirty ring */
 #define  KVM_DIRTY_RING_MAX_ENTRIES  65536
 
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+
+struct kvm_exported_tdp {
+	struct kvm_tdp_fd *tdp_fd;
+
+	struct kvm *kvm;
+	u32 as_id;
+	/* head at kvm->exported_tdp_list */
+	struct list_head list_node;
+};
+
+#endif /* CONFIG_HAVE_KVM_EXPORTED_TDP */
 #endif

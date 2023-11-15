@@ -1232,6 +1232,11 @@ static struct kvm *kvm_create_vm(unsigned long type, const char *fdname)
 	INIT_HLIST_HEAD(&kvm->irq_ack_notifier_list);
 #endif
 
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+	INIT_LIST_HEAD(&kvm->exported_tdp_list);
+	spin_lock_init(&kvm->exported_tdplist_lock);
+#endif
+
 	r = kvm_init_mmu_notifier(kvm);
 	if (r)
 		goto out_err_no_mmu_notifier;
