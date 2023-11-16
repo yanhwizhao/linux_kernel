@@ -217,7 +217,7 @@ static void kvm_tdp_unregister_all_importers(struct kvm_exported_tdp *tdp)
 
 static void *kvm_tdp_get_metadata(struct kvm_tdp_fd *tdp_fd)
 {
-	return ERR_PTR(-EOPNOTSUPP);
+	return kvm_arch_exported_tdp_get_metadata(tdp_fd->priv);
 }
 
 static int kvm_tdp_fault(struct kvm_tdp_fd *tdp_fd, struct mm_struct *mm,

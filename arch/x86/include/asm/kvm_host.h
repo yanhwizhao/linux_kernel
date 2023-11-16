@@ -26,6 +26,7 @@
 #include <linux/irqbypass.h>
 #include <linux/hyperv.h>
 #include <linux/kfifo.h>
+#include <linux/kvm_tdp_fd.h>
 
 #include <asm/apic.h>
 #include <asm/pvclock-abi.h>
@@ -1493,6 +1494,7 @@ struct kvm_exported_tdp_mmu {
 };
 struct kvm_arch_exported_tdp {
 	struct kvm_exported_tdp_mmu mmu;
+	void *meta;
 };
 #endif
 
@@ -1784,6 +1786,11 @@ struct kvm_x86_ops {
 	 * Returns vCPU specific APICv inhibit reasons
 	 */
 	unsigned long (*vcpu_get_apicv_inhibit_reasons)(struct kvm_vcpu *vcpu);
+
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+	unsigned long exported_tdp_meta_size;
+	void (*exported_tdp_meta_compose)(struct kvm_exported_tdp *tdp);
+#endif
 };
 
 struct kvm_x86_nested_ops {

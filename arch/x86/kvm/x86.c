@@ -13432,18 +13432,39 @@ EXPORT_SYMBOL_GPL(kvm_arch_no_poll);
 #ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
 int kvm_arch_exported_tdp_init(struct kvm *kvm, struct kvm_exported_tdp *tdp)
 {
+	void *meta;
 	int ret;
 
-	ret = kvm_mmu_get_exported_tdp(kvm, tdp);
-	if (ret)
-		return ret;
+	if (!kvm_x86_ops.exported_tdp_meta_size ||
+	    !kvm_x86_ops.exported_tdp_meta_compose)
+		return -EOPNOTSUPP;
 
+	meta = __vmalloc(kvm_x86_ops.exported_tdp_meta_size,
+			 GFP_KERNEL_ACCOUNT | __GFP_ZERO);
+	if (!meta)
+		return -ENOMEM;
+
+	tdp->arch.meta = meta;
+
+	ret = kvm_mmu_get_exported_tdp(kvm, tdp);
+	if (ret) {
+		kvfree(meta);
+		return ret;
+	}
+
+	static_call(kvm_x86_exported_tdp_meta_compose)(tdp);
 	return 0;
 }
 
 void kvm_arch_exported_tdp_destroy(struct kvm_exported_tdp *tdp)
 {
 	kvm_mmu_put_exported_tdp(tdp);
+	kvfree(tdp->arch.meta);
+}
+
+void *kvm_arch_exported_tdp_get_metadata(struct kvm_exported_tdp *tdp)
+{
+	return tdp->arch.meta;
 }
 
 int kvm_arch_fault_exported_tdp(struct kvm_exported_tdp *tdp, unsigned long gfn,

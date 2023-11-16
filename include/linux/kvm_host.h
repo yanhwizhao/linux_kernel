@@ -2348,6 +2348,7 @@ int kvm_arch_exported_tdp_init(struct kvm *kvm, struct kvm_exported_tdp *tdp);
 void kvm_arch_exported_tdp_destroy(struct kvm_exported_tdp *tdp);
 int kvm_arch_fault_exported_tdp(struct kvm_exported_tdp *tdp, unsigned long gfn,
 				struct kvm_tdp_fault_type type);
+void *kvm_arch_exported_tdp_get_metadata(struct kvm_exported_tdp *tdp);
 #else
 static inline int kvm_arch_exported_tdp_init(struct kvm *kvm,
 					     struct kvm_exported_tdp *tdp)
@@ -2363,6 +2364,11 @@ static inline int kvm_arch_fault_exported_tdp(struct kvm_exported_tdp *tdp,
 					      struct kvm_tdp_fault_type type)
 {
 	return -EOPNOTSUPP;
+}
+
+static inline void *kvm_arch_exported_tdp_get_metadata(struct kvm_exported_tdp *tdp)
+{
+	return NULL;
 }
 #endif /* __KVM_HAVE_ARCH_EXPORTED_TDP */
 
