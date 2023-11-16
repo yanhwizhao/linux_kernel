@@ -48,6 +48,7 @@
 #include <asm/mwait.h>
 #include <asm/spec-ctrl.h>
 #include <asm/vmx.h>
+#include <asm/kvm_exported_tdp.h>
 
 #include "capabilities.h"
 #include "cpuid.h"
@@ -8216,6 +8217,22 @@ static void vmx_vm_destroy(struct kvm *kvm)
 	free_pages((unsigned long)kvm_vmx->pid_table, vmx_get_pid_table_order(kvm));
 }
 
+#ifdef CONFIG_KVM_INTEL_EXPORTED_EPT
+void kvm_exported_tdp_compose_meta(struct kvm_exported_tdp *tdp)
+{
+	struct kvm_exported_tdp_meta_vmx *meta = tdp->arch.meta;
+	struct kvm_mmu_common *context = &tdp->arch.mmu.common;
+	void *rsvd_bits_mask = context->shadow_zero_check.rsvd_bits_mask;
+
+	meta->root_hpa = context->root.hpa;
+	meta->level = context->root_role.level;
+	meta->max_huge_page_level = min(ept_caps_to_lpage_level(vmx_capability.ept),
+					KVM_MAX_HUGEPAGE_LEVEL);
+	memcpy(meta->rsvd_bits_mask, rsvd_bits_mask, sizeof(meta->rsvd_bits_mask));
+	meta->type = KVM_TDP_TYPE_EPT;
+}
+#endif
+
 static struct kvm_x86_ops vmx_x86_ops __initdata = {
 	.name = KBUILD_MODNAME,
 
@@ -8357,6 +8374,11 @@ static struct kvm_x86_ops vmx_x86_ops __initdata = {
 	.complete_emulated_msr = kvm_complete_insn_gp,
 
 	.vcpu_deliver_sipi_vector = kvm_vcpu_deliver_sipi_vector,
+
+#ifdef CONFIG_KVM_INTEL_EXPORTED_EPT
+	.exported_tdp_meta_size = sizeof(struct kvm_exported_tdp_meta_vmx),
+	.exported_tdp_meta_compose = kvm_exported_tdp_compose_meta,
+#endif
 };
 
 static unsigned int vmx_handle_intel_pt_intr(void)
