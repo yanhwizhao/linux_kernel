@@ -1476,7 +1476,25 @@ struct kvm_arch {
 	 */
 #define SPLIT_DESC_CACHE_MIN_NR_OBJECTS (SPTE_ENT_PER_PAGE + 1)
 	struct kvm_mmu_memory_cache split_desc_cache;
+
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+	struct kvm_mmu_memory_cache exported_tdp_header_cache;
+	struct kvm_mmu_memory_cache exported_tdp_page_cache;
+	struct mutex exported_tdp_cache_lock;
+	int maxphyaddr;
+#endif
 };
+
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+#define __KVM_HAVE_ARCH_EXPORTED_TDP
+struct kvm_exported_tdp_mmu {
+	struct kvm_mmu_common common;
+	struct kvm_mmu_page *root_page;
+};
+struct kvm_arch_exported_tdp {
+	struct kvm_exported_tdp_mmu mmu;
+};
+#endif
 
 struct kvm_vm_stat {
 	struct kvm_vm_stat_generic generic;

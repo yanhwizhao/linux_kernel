@@ -1824,3 +1824,50 @@ u64 *kvm_tdp_mmu_fast_pf_get_last_sptep(struct kvm_vcpu *vcpu, u64 addr,
 	 */
 	return rcu_dereference(sptep);
 }
+
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+static struct kvm_mmu_page *tdp_mmu_alloc_sp_exported_cache(struct kvm *kvm)
+{
+	struct kvm_mmu_page *sp;
+
+	sp = kvm_mmu_memory_cache_alloc(&kvm->arch.exported_tdp_header_cache);
+	sp->spt = kvm_mmu_memory_cache_alloc(&kvm->arch.exported_tdp_page_cache);
+
+	return sp;
+}
+
+struct kvm_mmu_page *kvm_tdp_mmu_get_exported_root(struct kvm *kvm,
+						   struct kvm_exported_tdp_mmu *mmu)
+{
+	union kvm_mmu_page_role role = mmu->common.root_role;
+	struct kvm_mmu_page *root;
+
+	lockdep_assert_held_write(&kvm->mmu_lock);
+
+	for_each_tdp_mmu_root(kvm, root, kvm_mmu_role_as_id(role)) {
+		if (root->role.word == role.word &&
+		    kvm_tdp_mmu_get_root(root))
+			goto out;
+
+	}
+
+	root = tdp_mmu_alloc_sp_exported_cache(kvm);
+	tdp_mmu_init_sp(root, NULL, 0, role);
+
+	refcount_set(&root->tdp_mmu_root_count, 2);
+
+	spin_lock(&kvm->arch.tdp_mmu_pages_lock);
+	list_add_rcu(&root->link, &kvm->arch.tdp_mmu_roots);
+	spin_unlock(&kvm->arch.tdp_mmu_pages_lock);
+
+out:
+	return root;
+}
+
+void kvm_tdp_mmu_put_exported_root(struct kvm *kvm, struct kvm_mmu_page *root)
+{
+	tdp_mmu_zap_root(kvm, root, false);
+	kvm_tdp_mmu_put_root(kvm, root, false);
+}
+
+#endif

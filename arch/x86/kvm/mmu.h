@@ -251,6 +251,11 @@ int kvm_arch_write_log_dirty(struct kvm_vcpu *vcpu);
 int kvm_mmu_post_init_vm(struct kvm *kvm);
 void kvm_mmu_pre_destroy_vm(struct kvm *kvm);
 
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+int kvm_mmu_get_exported_tdp(struct kvm *kvm, struct kvm_exported_tdp *tdp);
+void kvm_mmu_put_exported_tdp(struct kvm_exported_tdp *tdp);
+#endif
+
 static inline bool kvm_shadow_root_allocated(struct kvm *kvm)
 {
 	/*

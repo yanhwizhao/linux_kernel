@@ -130,6 +130,10 @@ struct kvm_mmu_page {
 	/* Used for freeing the page asynchronously if it is a TDP MMU page. */
 	struct rcu_head rcu_head;
 #endif
+
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+	bool exported;
+#endif
 };
 
 extern struct kmem_cache *mmu_page_header_cache;

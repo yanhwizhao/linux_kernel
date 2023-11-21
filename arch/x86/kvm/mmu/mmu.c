@@ -5468,6 +5468,13 @@ void kvm_mmu_after_set_cpuid(struct kvm_vcpu *vcpu)
 	vcpu->arch.nested_mmu.cpu_role.ext.valid = 0;
 	kvm_mmu_reset_context(vcpu);
 
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+	if (vcpu->kvm->arch.maxphyaddr)
+		vcpu->kvm->arch.maxphyaddr = min(vcpu->kvm->arch.maxphyaddr,
+						 vcpu->arch.maxphyaddr);
+	else
+		vcpu->kvm->arch.maxphyaddr = vcpu->arch.maxphyaddr;
+#endif
 	/*
 	 * Changing guest CPUID after KVM_RUN is forbidden, see the comment in
 	 * kvm_arch_vcpu_ioctl().
@@ -6216,6 +6223,13 @@ void kvm_mmu_init_vm(struct kvm *kvm)
 
 	kvm->arch.split_desc_cache.kmem_cache = pte_list_desc_cache;
 	kvm->arch.split_desc_cache.gfp_zero = __GFP_ZERO;
+
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+	mutex_init(&kvm->arch.exported_tdp_cache_lock);
+	kvm->arch.exported_tdp_header_cache.kmem_cache = mmu_page_header_cache;
+	kvm->arch.exported_tdp_header_cache.gfp_zero = __GFP_ZERO;
+	kvm->arch.exported_tdp_page_cache.gfp_zero = __GFP_ZERO;
+#endif
 }
 
 static void mmu_free_vm_memory_caches(struct kvm *kvm)
@@ -7193,3 +7207,118 @@ void kvm_mmu_pre_destroy_vm(struct kvm *kvm)
 	if (kvm->arch.nx_huge_page_recovery_thread)
 		kthread_stop(kvm->arch.nx_huge_page_recovery_thread);
 }
+
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+static bool kvm_mmu_is_expoted_allowed(struct kvm *kvm, int as_id)
+{
+	if (as_id != 0) {
+		pr_err("unsupported address space to export TDP\n");
+		return false;
+	}
+
+	/*
+	 * Currently, exporting TDP is based on TDP MMU and is not enabled on
+	 * hyperv, one of the reasons is because of hyperv's tlb flush way
+	 */
+	if (!tdp_mmu_enabled || IS_ENABLED(CONFIG_HYPERV) ||
+	    !IS_ENABLED(CONFIG_HAVE_KVM_MMU_PRESENT_HIGH)) {
+		pr_err("Not allowed to create exported tdp, please check config\n");
+		return false;
+	}
+
+	/* we need max phys addr of vcpus, so oneline vcpus must > 0 */
+	if (!atomic_read(&kvm->online_vcpus)) {
+		pr_err("Exported tdp must be created after vCPUs created\n");
+		return false;
+	}
+
+	if (kvm->arch.maxphyaddr < 32) {
+		pr_err("Exported tdp must be created on 64-bit platform\n");
+		return false;
+	}
+	/*
+	 * Do not allow noncoherent DMA if TDP is exported, because mapping of
+	 * the exported TDP may not be at vCPU context, but noncoherent DMA
+	 * requires vCPU mode and guest vCPU MTRRs to get the right memory type.
+	 */
+	if (kvm_arch_has_noncoherent_dma(kvm)) {
+		pr_err("Not allowed to create exported tdp for noncoherent DMA\n");
+		return false;
+	}
+
+	return true;
+}
+
+static void init_kvm_exported_tdp_mmu(struct kvm *kvm, int as_id,
+				     struct kvm_exported_tdp_mmu *mmu)
+{
+	WARN_ON(!kvm->arch.maxphyaddr);
+
+	union kvm_cpu_role cpu_role = { 0 };
+
+	cpu_role.base.smm = !!as_id;
+	cpu_role.base.guest_mode = 0;
+
+	mmu->common.root_role = kvm_calc_tdp_mmu_root_page_role(kvm->arch.maxphyaddr,
+								cpu_role);
+	reset_tdp_shadow_zero_bits_mask(&mmu->common);
+}
+
+static int mmu_topup_exported_tdp_caches(struct kvm *kvm)
+{
+	int r;
+
+	lockdep_assert_held(&kvm->arch.exported_tdp_cache_lock);
+
+	r = kvm_mmu_topup_memory_cache(&kvm->arch.exported_tdp_header_cache,
+				       PT64_ROOT_MAX_LEVEL);
+	if (r)
+		return r;
+
+	return kvm_mmu_topup_memory_cache(&kvm->arch.exported_tdp_page_cache,
+				       PT64_ROOT_MAX_LEVEL);
+}
+
+int kvm_mmu_get_exported_tdp(struct kvm *kvm, struct kvm_exported_tdp *tdp)
+{
+	struct kvm_exported_tdp_mmu *mmu = &tdp->arch.mmu;
+	struct kvm_mmu_page *root;
+	int ret;
+
+	if (!kvm_mmu_is_expoted_allowed(kvm, tdp->as_id))
+		return -EINVAL;
+
+	init_kvm_exported_tdp_mmu(kvm, tdp->as_id, mmu);
+
+	mutex_lock(&kvm->arch.exported_tdp_cache_lock);
+	ret = mmu_topup_exported_tdp_caches(kvm);
+	if (ret) {
+		mutex_unlock(&kvm->arch.exported_tdp_cache_lock);
+		return ret;
+	}
+	write_lock(&kvm->mmu_lock);
+	root = kvm_tdp_mmu_get_exported_root(kvm, mmu);
+	WARN_ON(root->exported);
+	root->exported = true;
+	mmu->common.root.hpa = __pa(root->spt);
+	mmu->root_page = root;
+	write_unlock(&kvm->mmu_lock);
+
+	mutex_unlock(&kvm->arch.exported_tdp_cache_lock);
+
+	return 0;
+}
+
+void kvm_mmu_put_exported_tdp(struct kvm_exported_tdp *tdp)
+{
+	struct kvm_exported_tdp_mmu *mmu = &tdp->arch.mmu;
+	struct kvm *kvm = tdp->kvm;
+
+	write_lock(&kvm->mmu_lock);
+	mmu->root_page->exported = false;
+	kvm_tdp_mmu_put_exported_root(kvm, mmu->root_page);
+	mmu->common.root.hpa = INVALID_PAGE;
+	mmu->root_page = NULL;
+	write_unlock(&kvm->mmu_lock);
+}
+#endif

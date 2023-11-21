@@ -13429,6 +13429,23 @@ bool kvm_arch_no_poll(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(kvm_arch_no_poll);
 
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+int kvm_arch_exported_tdp_init(struct kvm *kvm, struct kvm_exported_tdp *tdp)
+{
+	int ret;
+
+	ret = kvm_mmu_get_exported_tdp(kvm, tdp);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+void kvm_arch_exported_tdp_destroy(struct kvm_exported_tdp *tdp)
+{
+	kvm_mmu_put_exported_tdp(tdp);
+}
+#endif
 
 int kvm_spec_ctrl_test_value(u64 value)
 {

@@ -75,4 +75,10 @@ static inline bool is_tdp_mmu_page(struct kvm_mmu_page *sp) { return sp->tdp_mmu
 static inline bool is_tdp_mmu_page(struct kvm_mmu_page *sp) { return false; }
 #endif
 
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+struct kvm_mmu_page *kvm_tdp_mmu_get_exported_root(struct kvm *kvm,
+						   struct kvm_exported_tdp_mmu *mmu);
+void kvm_tdp_mmu_put_exported_root(struct kvm *kvm, struct kvm_mmu_page *root);
+#endif
+
 #endif /* __KVM_X86_MMU_TDP_MMU_H */
