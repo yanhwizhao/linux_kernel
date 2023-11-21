@@ -223,7 +223,33 @@ static void *kvm_tdp_get_metadata(struct kvm_tdp_fd *tdp_fd)
 static int kvm_tdp_fault(struct kvm_tdp_fd *tdp_fd, struct mm_struct *mm,
 			 unsigned long gfn, struct kvm_tdp_fault_type type)
 {
-	return -EOPNOTSUPP;
+	bool kthread = current->mm == NULL;
+	int ret = -EINVAL;
+
+	if (!tdp_fd || !tdp_fd->priv || !tdp_fd->priv->kvm)
+		return -EINVAL;
+
+	if (!type.read && !type.write && !type.exec)
+		return -EINVAL;
+
+	if (!mm || tdp_fd->priv->kvm->mm != mm)
+		return -EINVAL;
+
+	if (!mmget_not_zero(mm))
+		return -EPERM;
+
+	if (kthread)
+		kthread_use_mm(mm);
+	else if (current->mm != mm)
+		goto out;
+
+	ret = kvm_arch_fault_exported_tdp(tdp_fd->priv, gfn, type);
+
+	if (kthread)
+		kthread_unuse_mm(mm);
+out:
+	mmput(mm);
+	return ret;
 }
 
 static const struct kvm_exported_tdp_ops exported_tdp_ops = {
