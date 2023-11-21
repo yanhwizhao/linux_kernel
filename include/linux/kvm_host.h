@@ -2327,6 +2327,9 @@ static inline void kvm_account_pgtable_pages(void *virt, int nr)
 #ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
 
 struct kvm_exported_tdp {
+#ifdef __KVM_HAVE_ARCH_EXPORTED_TDP
+	struct kvm_arch_exported_tdp arch;
+#endif
 	struct kvm_tdp_fd *tdp_fd;
 
 	struct kvm *kvm;
@@ -2334,6 +2337,20 @@ struct kvm_exported_tdp {
 	/* head at kvm->exported_tdp_list */
 	struct list_head list_node;
 };
+
+#ifdef __KVM_HAVE_ARCH_EXPORTED_TDP
+int kvm_arch_exported_tdp_init(struct kvm *kvm, struct kvm_exported_tdp *tdp);
+void kvm_arch_exported_tdp_destroy(struct kvm_exported_tdp *tdp);
+#else
+static inline int kvm_arch_exported_tdp_init(struct kvm *kvm,
+					     struct kvm_exported_tdp *tdp)
+{
+	return -EOPNOTSUPP;
+}
+static inline void kvm_arch_exported_tdp_destroy(struct kvm_exported_tdp *tdp)
+{
+}
+#endif /* __KVM_HAVE_ARCH_EXPORTED_TDP */
 
 #endif /* CONFIG_HAVE_KVM_EXPORTED_TDP */
 #endif

@@ -52,17 +52,20 @@ int kvm_create_tdp_fd(struct kvm *kvm, struct kvm_create_tdp_fd *ct)
 		goto out;
 	}
 	tdp->kvm = kvm;
+	ret = kvm_arch_exported_tdp_init(kvm, tdp);
+	if (ret)
+		goto out;
 
 	tdp_fd->file = anon_inode_getfile("tdp_fd", &kvm_tdp_fd_fops,
 					tdp_fd, O_RDWR | O_CLOEXEC);
 	if (!tdp_fd->file) {
 		ret = -EFAULT;
-		goto out;
+		goto out_uninit;
 	}
 
 	fd = get_unused_fd_flags(O_RDWR | O_CLOEXEC);
 	if (fd < 0)
-		goto out;
+		goto out_uninit;
 
 	fd_install(fd, tdp_fd->file);
 	ct->fd = fd;
@@ -73,10 +76,12 @@ int kvm_create_tdp_fd(struct kvm *kvm, struct kvm_create_tdp_fd *ct)
 	spin_unlock(&kvm->exported_tdplist_lock);
 	return 0;
 
-out:
+out_uninit:
 	if (tdp_fd->file)
 		fput(tdp_fd->file);
 
+	kvm_arch_exported_tdp_destroy(tdp);
+out:
 	if (tdp->kvm)
 		kvm_put_kvm_no_destroy(tdp->kvm);
 	kfree(tdp);
@@ -102,6 +107,7 @@ static int kvm_tdp_fd_release(struct inode *inode, struct file *file)
 	list_del(&tdp->list_node);
 	spin_unlock(&tdp->kvm->exported_tdplist_lock);
 
+	kvm_arch_exported_tdp_destroy(tdp);
 	kvm_put_kvm(tdp->kvm);
 	kfree(tdp);
 	kfree(tdp_fd);
