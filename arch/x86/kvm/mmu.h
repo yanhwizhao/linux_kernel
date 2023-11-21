@@ -254,6 +254,7 @@ void kvm_mmu_pre_destroy_vm(struct kvm *kvm);
 #ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
 int kvm_mmu_get_exported_tdp(struct kvm *kvm, struct kvm_exported_tdp *tdp);
 void kvm_mmu_put_exported_tdp(struct kvm_exported_tdp *tdp);
+int kvm_mmu_fault_exported_tdp(struct kvm_exported_tdp *tdp, unsigned long gfn, u32 err);
 #endif
 
 static inline bool kvm_shadow_root_allocated(struct kvm *kvm)

@@ -13445,6 +13445,28 @@ void kvm_arch_exported_tdp_destroy(struct kvm_exported_tdp *tdp)
 {
 	kvm_mmu_put_exported_tdp(tdp);
 }
+
+int kvm_arch_fault_exported_tdp(struct kvm_exported_tdp *tdp, unsigned long gfn,
+				struct kvm_tdp_fault_type type)
+{
+	u32 err = 0;
+	int ret;
+
+	if (type.read)
+		err |= PFERR_PRESENT_MASK | PFERR_USER_MASK;
+
+	if (type.write)
+		err |= PFERR_WRITE_MASK;
+
+	if (type.exec)
+		err |= PFERR_FETCH_MASK;
+
+	mutex_lock(&tdp->kvm->slots_lock);
+	ret = kvm_mmu_fault_exported_tdp(tdp, gfn, err);
+	mutex_unlock(&tdp->kvm->slots_lock);
+	return ret;
+}
+
 #endif
 
 int kvm_spec_ctrl_test_value(u64 value)

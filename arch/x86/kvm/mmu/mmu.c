@@ -7324,4 +7324,61 @@ void kvm_mmu_put_exported_tdp(struct kvm_exported_tdp *tdp)
 	mmu->root_page = NULL;
 	write_unlock(&kvm->mmu_lock);
 }
+
+int kvm_mmu_fault_exported_tdp(struct kvm_exported_tdp *tdp, unsigned long gfn, u32 err)
+{
+	struct kvm *kvm = tdp->kvm;
+	struct kvm_page_fault fault = {
+		.addr = gfn << PAGE_SHIFT,
+		.error_code = err,
+		.prefetch = false,
+		.exec = err & PFERR_FETCH_MASK,
+		.write = err & PFERR_WRITE_MASK,
+		.present = err & PFERR_PRESENT_MASK,
+		.rsvd = err & PFERR_RSVD_MASK,
+		.user = err & PFERR_USER_MASK,
+		.is_tdp = true,
+		.nx_huge_page_workaround_enabled = is_nx_huge_page_enabled(kvm),
+		.max_level = KVM_MAX_HUGEPAGE_LEVEL,
+		.req_level = PG_LEVEL_4K,
+		.goal_level = PG_LEVEL_4K,
+		.gfn = gfn,
+		.slot = gfn_to_memslot(kvm, gfn),
+	};
+	struct kvm_exported_tdp_mmu *mmu = &tdp->arch.mmu;
+	int r;
+
+	if (page_fault_handle_page_track(kvm, &fault))
+		return -EINVAL;
+retry:
+	r = kvm_faultin_pfn(kvm, NULL, &fault, ACC_ALL);
+	if (r != RET_PF_CONTINUE)
+		goto out;
+
+	mutex_lock(&kvm->arch.exported_tdp_cache_lock);
+	r = mmu_topup_exported_tdp_caches(kvm);
+	if (r)
+		goto out_cache;
+
+	r = RET_PF_RETRY;
+	read_lock(&kvm->mmu_lock);
+	if (fault.slot && mmu_invalidate_retry_hva(kvm, fault.mmu_seq, fault.hva))
+		goto out_mmu;
+
+	if (mmu->root_page && is_obsolete_sp(kvm, mmu->root_page))
+		goto out_mmu;
+
+	r = kvm_tdp_mmu_map_exported_root(kvm, mmu, &fault);
+
+out_mmu:
+	read_unlock(&kvm->mmu_lock);
+out_cache:
+	mutex_unlock(&kvm->arch.exported_tdp_cache_lock);
+	kvm_release_pfn_clean(fault.pfn);
+out:
+	if (r == RET_PF_RETRY)
+		goto retry;
+
+	return r == RET_PF_FIXED ? 0 : -EFAULT;
+}
 #endif
