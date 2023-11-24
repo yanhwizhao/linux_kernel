@@ -49,7 +49,6 @@
 #define MAX_AGAW_PFN_WIDTH	(MAX_AGAW_WIDTH - VTD_PAGE_SHIFT)
 
 #define __DOMAIN_MAX_PFN(gaw)  ((((uint64_t)1) << ((gaw) - VTD_PAGE_SHIFT)) - 1)
-#define __DOMAIN_MAX_ADDR(gaw) ((((uint64_t)1) << (gaw)) - 1)
 
 /* We limit DOMAIN_MAX_PFN to fit in an unsigned long, and DOMAIN_MAX_ADDR
    to match. That way, we can use 'unsigned long' for PFNs with impunity. */
@@ -62,10 +61,6 @@
 
 #define IOVA_PFN(addr)		((addr) >> PAGE_SHIFT)
 
-/* page table handling */
-#define LEVEL_STRIDE		(9)
-#define LEVEL_MASK		(((u64)1 << LEVEL_STRIDE) - 1)
-
 static inline int agaw_to_level(int agaw)
 {
 	return agaw + 2;
@@ -74,11 +69,6 @@ static inline int agaw_to_level(int agaw)
 static inline int agaw_to_width(int agaw)
 {
 	return min_t(int, 30 + agaw * LEVEL_STRIDE, MAX_AGAW_WIDTH);
-}
-
-static inline int width_to_agaw(int width)
-{
-	return DIV_ROUND_UP(width - 30, LEVEL_STRIDE);
 }
 
 static inline unsigned int level_to_offset_bits(int level)
@@ -281,8 +271,6 @@ static LIST_HEAD(dmar_satc_units);
 #define for_each_rmrr_units(rmrr) \
 	list_for_each_entry(rmrr, &dmar_rmrr_units, list)
 
-static void intel_iommu_domain_free(struct iommu_domain *domain);
-
 int dmar_disabled = !IS_ENABLED(CONFIG_INTEL_IOMMU_DEFAULT_ON);
 int intel_iommu_sm = IS_ENABLED(CONFIG_INTEL_IOMMU_SCALABLE_MODE_DEFAULT_ON);
 
@@ -448,12 +436,6 @@ int iommu_calculate_max_sagaw(struct intel_iommu *iommu)
 int iommu_calculate_agaw(struct intel_iommu *iommu)
 {
 	return __iommu_calculate_agaw(iommu, DEFAULT_DOMAIN_ADDRESS_WIDTH);
-}
-
-static inline bool iommu_paging_structure_coherency(struct intel_iommu *iommu)
-{
-	return sm_supported(iommu) ?
-			ecap_smpwc(iommu->ecap) : ecap_coherent(iommu->ecap);
 }
 
 static void domain_update_iommu_coherency(struct dmar_domain *domain)
@@ -1757,7 +1739,7 @@ static bool first_level_by_default(unsigned int type)
 	return type != IOMMU_DOMAIN_UNMANAGED;
 }
 
-static struct dmar_domain *alloc_domain(unsigned int type)
+struct dmar_domain *alloc_domain(unsigned int type)
 {
 	struct dmar_domain *domain;
 
@@ -1840,20 +1822,6 @@ void domain_detach_iommu(struct dmar_domain *domain, struct intel_iommu *iommu)
 		kfree(info);
 	}
 	spin_unlock(&iommu->lock);
-}
-
-static inline int guestwidth_to_adjustwidth(int gaw)
-{
-	int agaw;
-	int r = (gaw - 12) % 9;
-
-	if (r == 0)
-		agaw = gaw;
-	else
-		agaw = gaw + 9 - r;
-	if (agaw > 64)
-		agaw = 64;
-	return agaw;
 }
 
 static void domain_exit(struct dmar_domain *domain)
@@ -4106,7 +4074,7 @@ intel_iommu_domain_alloc_user(struct device *dev, u32 flags,
 	return domain;
 }
 
-static void intel_iommu_domain_free(struct iommu_domain *domain)
+void intel_iommu_domain_free(struct iommu_domain *domain)
 {
 	if (domain != &si_domain->domain)
 		domain_exit(to_dmar_domain(domain));
@@ -4155,8 +4123,7 @@ int prepare_domain_attach_device(struct iommu_domain *domain,
 	return 0;
 }
 
-static int intel_iommu_attach_device(struct iommu_domain *domain,
-				     struct device *dev)
+int intel_iommu_attach_device(struct iommu_domain *domain, struct device *dev)
 {
 	struct device_domain_info *info = dev_iommu_priv_get(dev);
 	int ret;

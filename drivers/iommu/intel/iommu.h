@@ -1021,4 +1021,39 @@ static inline const char *decode_prq_descriptor(char *str, size_t size,
 	return str;
 }
 
+#define __DOMAIN_MAX_ADDR(gaw) ((((uint64_t)1) << (gaw)) - 1)
+
+/* page table handling */
+#define LEVEL_STRIDE		(9)
+#define LEVEL_MASK		(((u64)1 << LEVEL_STRIDE) - 1)
+
+int intel_iommu_attach_device(struct iommu_domain *domain, struct device *dev);
+void intel_iommu_domain_free(struct iommu_domain *domain);
+struct dmar_domain *alloc_domain(unsigned int type);
+
+static inline int guestwidth_to_adjustwidth(int gaw)
+{
+	int agaw;
+	int r = (gaw - 12) % 9;
+
+	if (r == 0)
+		agaw = gaw;
+	else
+		agaw = gaw + 9 - r;
+	if (agaw > 64)
+		agaw = 64;
+	return agaw;
+}
+
+static inline bool iommu_paging_structure_coherency(struct intel_iommu *iommu)
+{
+	return sm_supported(iommu) ?
+			ecap_smpwc(iommu->ecap) : ecap_coherent(iommu->ecap);
+}
+
+static inline int width_to_agaw(int width)
+{
+	return DIV_ROUND_UP(width - 30, LEVEL_STRIDE);
+}
+
 #endif
