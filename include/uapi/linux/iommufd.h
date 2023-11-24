@@ -391,6 +391,15 @@ struct iommu_hwpt_vtd_s1 {
 };
 
 /**
+ * struct iommu_hwpt_kvm_info - KVM managed stage-2 page table info
+ *                              (IOMMU_HWPT_DATA_KVM)
+ * @fd: The fd of the page table shared from KVM
+ */
+struct iommu_hwpt_kvm_info {
+	__aligned_u64 fd;
+};
+
+/**
  * struct iommu_hwpt_arm_smmuv3 - ARM SMMUv3 Context Descriptor Table info
  *                                (IOMMU_HWPT_DATA_ARM_SMMUV3)
  *
@@ -413,11 +422,13 @@ struct iommu_hwpt_arm_smmuv3 {
  * @IOMMU_HWPT_DATA_NONE: no data
  * @IOMMU_HWPT_DATA_VTD_S1: Intel VT-d stage-1 page table
  * @IOMMU_HWPT_DATA_ARM_SMMUV3: ARM SMMUv3 Context Descriptor Table
+ * @IOMMU_HWPT_DATA_KVM: KVM managed stage-2 page table
  */
 enum iommu_hwpt_data_type {
 	IOMMU_HWPT_DATA_NONE,
 	IOMMU_HWPT_DATA_VTD_S1,
 	IOMMU_HWPT_DATA_ARM_SMMUV3,
+	IOMMU_HWPT_DATA_KVM,
 };
 
 /**
@@ -446,6 +457,10 @@ enum iommu_hwpt_data_type {
  * same ioctl from a given IOAS (@pt_id). In this case, the @data_type
  * must be set to a pre-defined type corresponding to an I/O page table
  * type supported by the underlying IOMMU hardware.
+ *
+ * A KVM-managed HWPT will be created if @data_type is IOMMU_HWPT_DATA_KVM.
+ * @pt_id is not queried if data_type is IOMMU_HWPT_DATA_KVM because KVM-managed
+ * HWPT doesn't have any IOAS or parent HWPT associated.
  *
  * If the @data_type is set to IOMMU_HWPT_DATA_NONE, @data_len and
  * @data_uptr should be zero. Otherwise, both @data_len and @data_uptr
