@@ -679,10 +679,11 @@ int intel_pasid_setup_second_level(struct intel_iommu *iommu,
 	pasid_set_address_width(pte, agaw);
 	pasid_set_translation_type(pte, PASID_ENTRY_PGTT_SL_ONLY);
 	pasid_set_fault_enable(pte);
+	if (domain->force_snooping)
+		pasid_set_pgsnp(pte);
 	pasid_set_page_snoop(pte, !!ecap_smpwc(iommu->ecap));
 	if (domain->dirty_tracking)
 		pasid_set_ssade(pte);
-
 	pasid_set_present(pte);
 	spin_unlock(&iommu->lock);
 
