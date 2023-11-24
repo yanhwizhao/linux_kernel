@@ -897,12 +897,38 @@ void kvm_tdp_mmu_zap_invalidated_roots(struct kvm *kvm)
 	read_unlock(&kvm->mmu_lock);
 }
 
+void kvm_tdp_mmu_zap_exported_roots(struct kvm *kvm)
+{
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+	struct kvm_mmu_page *root;
+	bool flush;
+
+	lockdep_assert_held_write(&kvm->mmu_lock);
+
+	rcu_read_lock();
+
+	list_for_each_entry_rcu(root, &kvm->arch.tdp_mmu_roots, link) {
+		if (!root->exported)
+			continue;
+
+		flush = tdp_mmu_zap_leafs(kvm, root, 0, -1ULL, false, false);
+		if (flush)
+			kvm_flush_remote_tlbs(kvm);
+	}
+
+	rcu_read_unlock();
+#endif
+}
+
 /*
- * Mark each TDP MMU root as invalid to prevent vCPUs from reusing a root that
- * is about to be zapped, e.g. in response to a memslots update.  The actual
- * zapping is done separately so that it happens with mmu_lock with read,
- * whereas invalidating roots must be done with mmu_lock held for write (unless
- * the VM is being destroyed).
+ * Mark each TDP MMU root (except exported root) as invalid to prevent vCPUs from
+ * reusing a root that is about to be zapped, e.g. in response to a memslots
+ * update.
+ * The actual zapping is done separately so that it happens with mmu_lock
+ * with read, whereas invalidating roots must be done with mmu_lock held for write
+ * (unless the VM is being destroyed).
+ * For exported root, zap is done in kvm_tdp_mmu_zap_exported_roots() before
+ * the memslot update completes with mmu_lock held for write.
  *
  * Note, kvm_tdp_mmu_zap_invalidated_roots() is gifted the TDP MMU's reference.
  * See kvm_tdp_mmu_get_vcpu_root_hpa().
@@ -932,6 +958,10 @@ void kvm_tdp_mmu_invalidate_all_roots(struct kvm *kvm)
 	 * or get/put references to roots.
 	 */
 	list_for_each_entry(root, &kvm->arch.tdp_mmu_roots, link) {
+#ifdef CONFIG_HAVE_KVM_EXPORTED_TDP
+		if (root->exported)
+			continue;
+#endif
 		/*
 		 * Note, invalid roots can outlive a memslot update!  Invalid
 		 * roots must be *zapped* before the memslot update completes,

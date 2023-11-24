@@ -6187,6 +6187,9 @@ static void kvm_mmu_zap_all_fast(struct kvm *kvm)
 
 	kvm_zap_obsolete_pages(kvm);
 
+	if (tdp_mmu_enabled)
+		kvm_tdp_mmu_zap_exported_roots(kvm);
+
 	write_unlock(&kvm->mmu_lock);
 
 	/*
