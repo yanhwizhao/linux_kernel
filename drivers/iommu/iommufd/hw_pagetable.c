@@ -273,6 +273,31 @@ int iommufd_hwpt_alloc(struct iommufd_ucmd *ucmd)
 	if (IS_ERR(idev))
 		return PTR_ERR(idev);
 
+	if (cmd->data_type == IOMMU_HWPT_DATA_KVM) {
+		struct iommu_hwpt_kvm_info kvm_data;
+		struct iommufd_hwpt_kvm *hwpt_kvm;
+
+		if (!cmd->data_len || cmd->data_len != sizeof(kvm_data) ||
+		    !cmd->data_uptr) {
+			rc = -EINVAL;
+			goto out_put_idev;
+		}
+		rc = copy_struct_from_user(&kvm_data, sizeof(kvm_data),
+					   u64_to_user_ptr(cmd->data_uptr),
+					   cmd->data_len);
+		if (rc)
+			goto out_put_idev;
+
+		hwpt_kvm = iommufd_hwpt_kvm_alloc(ucmd->ictx, idev, cmd->flags,
+						  &kvm_data);
+		if (IS_ERR(hwpt_kvm)) {
+			rc = PTR_ERR(hwpt_kvm);
+			goto out_put_idev;
+		}
+		hwpt = &hwpt_kvm->common;
+		goto out_respond;
+	}
+
 	pt_obj = iommufd_get_object(ucmd->ictx, cmd->pt_id, IOMMUFD_OBJ_ANY);
 	if (IS_ERR(pt_obj)) {
 		rc = -EINVAL;
@@ -310,6 +335,7 @@ int iommufd_hwpt_alloc(struct iommufd_ucmd *ucmd)
 		goto out_put_pt;
 	}
 
+out_respond:
 	cmd->out_hwpt_id = hwpt->obj.id;
 	rc = iommufd_ucmd_respond(ucmd, sizeof(*cmd));
 	if (rc)
@@ -323,7 +349,8 @@ out_unlock:
 	if (ioas)
 		mutex_unlock(&ioas->mutex);
 out_put_pt:
-	iommufd_put_object(pt_obj);
+	if (cmd->data_type != IOMMU_HWPT_DATA_KVM)
+		iommufd_put_object(pt_obj);
 out_put_idev:
 	iommufd_put_object(&idev->obj);
 	return rc;

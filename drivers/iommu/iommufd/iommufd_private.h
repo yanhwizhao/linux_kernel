@@ -125,6 +125,7 @@ enum iommufd_object_type {
 	IOMMUFD_OBJ_DEVICE,
 	IOMMUFD_OBJ_HWPT_PAGING,
 	IOMMUFD_OBJ_HWPT_NESTED,
+	IOMMUFD_OBJ_HWPT_KVM,
 	IOMMUFD_OBJ_IOAS,
 	IOMMUFD_OBJ_ACCESS,
 #ifdef CONFIG_IOMMUFD_TEST
@@ -266,15 +267,31 @@ struct iommufd_hwpt_nested {
 	struct iommufd_hwpt_paging *parent;
 };
 
+struct iommufd_hwpt_kvm {
+	struct iommufd_hw_pagetable common;
+	void *context;
+};
+
 static inline bool hwpt_is_paging(struct iommufd_hw_pagetable *hwpt)
 {
 	return hwpt->obj.type == IOMMUFD_OBJ_HWPT_PAGING;
+}
+
+static inline bool hwpt_is_kvm(struct iommufd_hw_pagetable *hwpt)
+{
+	return hwpt->obj.type == IOMMUFD_OBJ_HWPT_KVM;
 }
 
 static inline struct iommufd_hwpt_paging *
 to_hwpt_paging(struct iommufd_hw_pagetable *hwpt)
 {
 	return container_of(hwpt, struct iommufd_hwpt_paging, common);
+}
+
+static inline struct iommufd_hwpt_kvm *
+to_hwpt_kvm(struct iommufd_hw_pagetable *hwpt)
+{
+	return container_of(hwpt, struct iommufd_hwpt_kvm, common);
 }
 
 static inline struct iommufd_hwpt_paging *
@@ -413,4 +430,22 @@ static inline bool iommufd_selftest_is_mock_dev(struct device *dev)
 	return false;
 }
 #endif
+
+struct iommu_hwpt_kvm_info;
+static inline struct iommufd_hwpt_kvm *
+iommufd_hwpt_kvm_alloc(struct iommufd_ctx *ictx,
+		       struct iommufd_device *idev, u32 flags,
+		       const struct iommu_hwpt_kvm_info *kvm_data)
+{
+	return ERR_PTR(-EOPNOTSUPP);
+}
+
+static inline void iommufd_hwpt_kvm_abort(struct iommufd_object *obj)
+{
+}
+
+static inline void iommufd_hwpt_kvm_destroy(struct iommufd_object *obj)
+{
+}
+
 #endif
