@@ -522,6 +522,13 @@ __iommu_copy_struct_from_user_array(void *dst_data,
  * @domain_alloc_paging: Allocate an iommu_domain that can be used for
  *                       UNMANAGED, DMA, and DMA_FQ domain types.
  * @domain_alloc_sva: Allocate an iommu_domain for Shared Virtual Addressing.
+ * @domain_alloc_kvm: Allocate an iommu domain with type IOMMU_DOMAIN_KVM.
+ *                    It's called by IOMMUFD and must fully initialize the new
+ *                    domain before return.
+ *                    The @data is of type "const void *" whose format is defined
+ *                    in kvm arch specific header "asm/kvm_exported_tdp.h".
+ *                    Unpon success, domain of type IOMMU_DOMAIN_KVM is returned.
+ *                    Upon failure, ERR_PTR is returned.
  * @probe_device: Add device to iommu driver handling
  * @release_device: Remove device from iommu driver handling
  * @probe_finalize: Do final setup work after the device is added to an IOMMU
@@ -564,6 +571,8 @@ struct iommu_ops {
 	struct iommu_domain *(*domain_alloc_paging)(struct device *dev);
 	struct iommu_domain *(*domain_alloc_sva)(struct device *dev,
 						 struct mm_struct *mm);
+	struct iommu_domain *(*domain_alloc_kvm)(struct device *dev, u32 flags,
+						 const void *data);
 
 	struct iommu_device *(*probe_device)(struct device *dev);
 	void (*release_device)(struct device *dev);
