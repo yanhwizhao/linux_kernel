@@ -3266,9 +3266,10 @@ static void kvm_send_hwpoison_signal(struct kvm_memory_slot *slot, gfn_t gfn)
 	send_sig_mceerr(BUS_MCEERR_AR, (void __user *)hva, PAGE_SHIFT, current);
 }
 
-static int kvm_handle_error_pfn(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
+static int kvm_handle_error_pfn(struct kvm *kvm, struct kvm_vcpu *vcpu,
+				struct kvm_page_fault *fault)
 {
-	if (is_sigpending_pfn(fault->pfn)) {
+	if (is_sigpending_pfn(fault->pfn) && vcpu) {
 		kvm_handle_signal_exit(vcpu);
 		return -EINTR;
 	}
@@ -3289,11 +3290,14 @@ static int kvm_handle_error_pfn(struct kvm_vcpu *vcpu, struct kvm_page_fault *fa
 	return -EFAULT;
 }
 
-static int kvm_handle_noslot_fault(struct kvm_vcpu *vcpu,
+static int kvm_handle_noslot_fault(struct kvm *kvm, struct kvm_vcpu *vcpu,
 				   struct kvm_page_fault *fault,
 				   unsigned int access)
 {
 	gva_t gva = fault->is_tdp ? 0 : fault->addr;
+
+	if (!vcpu)
+		return -EFAULT;
 
 	vcpu_cache_mmio_info(vcpu, gva, fault->gfn,
 			     access & shadow_mmio_access_mask);
@@ -4260,7 +4264,8 @@ void kvm_arch_async_page_ready(struct kvm_vcpu *vcpu, struct kvm_async_pf *work)
 	kvm_mmu_do_page_fault(vcpu, work->cr2_or_gpa, 0, true, NULL);
 }
 
-static int __kvm_faultin_pfn(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
+static int __kvm_faultin_pfn(struct kvm *kvm, struct kvm_vcpu *vcpu,
+			     struct kvm_page_fault *fault)
 {
 	struct kvm_memory_slot *slot = fault->slot;
 	bool async;
@@ -4275,7 +4280,7 @@ static int __kvm_faultin_pfn(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault
 
 	if (!kvm_is_visible_memslot(slot)) {
 		/* Don't expose private memslots to L2. */
-		if (is_guest_mode(vcpu)) {
+		if (vcpu && is_guest_mode(vcpu)) {
 			fault->slot = NULL;
 			fault->pfn = KVM_PFN_NOSLOT;
 			fault->map_writable = false;
@@ -4288,7 +4293,7 @@ static int __kvm_faultin_pfn(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault
 		 * when the AVIC is re-enabled.
 		 */
 		if (slot && slot->id == APIC_ACCESS_PAGE_PRIVATE_MEMSLOT &&
-		    !kvm_apicv_activated(vcpu->kvm))
+		    !kvm_apicv_activated(kvm))
 			return RET_PF_EMULATE;
 	}
 
@@ -4299,7 +4304,7 @@ static int __kvm_faultin_pfn(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault
 	if (!async)
 		return RET_PF_CONTINUE; /* *pfn has correct page already */
 
-	if (!fault->prefetch && kvm_can_do_async_pf(vcpu)) {
+	if (!fault->prefetch && vcpu && kvm_can_do_async_pf(vcpu)) {
 		trace_kvm_try_async_get_page(fault->addr, fault->gfn);
 		if (kvm_find_async_pf_gfn(vcpu, fault->gfn)) {
 			trace_kvm_async_pf_repeated_fault(fault->addr, fault->gfn);
@@ -4321,23 +4326,23 @@ static int __kvm_faultin_pfn(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault
 	return RET_PF_CONTINUE;
 }
 
-static int kvm_faultin_pfn(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault,
-			   unsigned int access)
+static int kvm_faultin_pfn(struct kvm *kvm, struct kvm_vcpu *vcpu,
+			   struct kvm_page_fault *fault, unsigned int access)
 {
 	int ret;
 
-	fault->mmu_seq = vcpu->kvm->mmu_invalidate_seq;
+	fault->mmu_seq = kvm->mmu_invalidate_seq;
 	smp_rmb();
 
-	ret = __kvm_faultin_pfn(vcpu, fault);
+	ret = __kvm_faultin_pfn(kvm, vcpu, fault);
 	if (ret != RET_PF_CONTINUE)
 		return ret;
 
 	if (unlikely(is_error_pfn(fault->pfn)))
-		return kvm_handle_error_pfn(vcpu, fault);
+		return kvm_handle_error_pfn(kvm, vcpu, fault);
 
 	if (unlikely(!fault->slot))
-		return kvm_handle_noslot_fault(vcpu, fault, access);
+		return kvm_handle_noslot_fault(kvm, vcpu, fault, access);
 
 	return RET_PF_CONTINUE;
 }
@@ -4389,7 +4394,7 @@ static int direct_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault
 	if (r)
 		return r;
 
-	r = kvm_faultin_pfn(vcpu, fault, ACC_ALL);
+	r = kvm_faultin_pfn(vcpu->kvm, vcpu, fault, ACC_ALL);
 	if (r != RET_PF_CONTINUE)
 		return r;
 
@@ -4469,7 +4474,7 @@ static int kvm_tdp_mmu_page_fault(struct kvm_vcpu *vcpu,
 	if (r)
 		return r;
 
-	r = kvm_faultin_pfn(vcpu, fault, ACC_ALL);
+	r = kvm_faultin_pfn(vcpu->kvm, vcpu, fault, ACC_ALL);
 	if (r != RET_PF_CONTINUE)
 		return r;
 
