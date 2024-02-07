@@ -4093,6 +4093,29 @@ static int intel_iommu_attach_device(struct iommu_domain *domain,
 	return dmar_domain_attach_device(to_dmar_domain(domain), dev);
 }
 
+static bool intel_iommu_is_mmio_pfn(unsigned long pfn)
+{
+	if (pfn_valid(pfn))
+		return !is_zero_pfn(pfn) && PageReserved(pfn_to_page(pfn)) &&
+			/* ISA range is reserved with PAT WB. Treat it as MMIO */
+			(is_ISA_range(PFN_PHYS(pfn), PFN_PHYS(pfn + 1)) ||
+			/* Treat reserved UC/UC-/WC pages as MMIO */
+			(!pat_enabled() || pat_pfn_immune_to_uc_mtrr(pfn)));
+
+	/*
+	 * Some pages are reserved from host visible via host kernel parameter
+	 * "mem=". If such page is mapped for user, CPU cache should also be
+	 * flushed as it's normal memory and cacheable. Check the raw e820 table
+	 * for E820_TYPE_RAM to cover this usage.
+	 * Other e820 types (e.g. E820_TYPE_NVS, E820_TYPE_ACPI) are not
+	 * considered to require CPU cache flush as they are not mappable for
+	 * user access.
+	 */
+	return !e820__mapped_raw_any(PFN_PHYS(pfn),
+				     PFN_PHYS(pfn + 1) - 1,
+				     E820_TYPE_RAM);
+}
+
 static int intel_iommu_map(struct iommu_domain *domain,
 			   unsigned long iova, phys_addr_t hpa,
 			   size_t size, int iommu_prot, gfp_t gfp)
