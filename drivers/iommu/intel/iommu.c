@@ -71,6 +71,10 @@ static int force_on = 0;
 static int intel_iommu_tboot_noforce;
 static int no_platform_optin;
 
+static void __intel_iommu_tlb_sync(struct dmar_domain *domain,
+				   unsigned long iova_pfn,
+				   unsigned long iova_nrpages, int ih);
+
 #define ROOT_ENTRY_NR (VTD_PAGE_SIZE/sizeof(struct root_entry))
 
 /*
@@ -947,29 +951,50 @@ static void dma_pte_free_pagetable(struct dmar_domain *domain,
 	}
 }
 
-/* When a page at a given level is being unlinked from its parent, we don't
-   need to *modify* it at all. All we need to do is make a list of all the
-   pages which can be freed just as soon as we've flushed the IOTLB and we
-   know the hardware page-walk will no longer touch them.
-   The 'pte' argument is the *parent* PTE, pointing to the page that is to
-   be freed. */
+/*
+ * - For domains not requiring CPU cache flush:
+ *   when a page at a given level is being unlinked from its parent, we don't
+ *   need to *modify* it at all. All we need to do is make a list of all the
+ *   pages which can be freed just as soon as we've flushed the IOTLB and we
+ *   know the hardware page-walk will no longer touch them.
+ * - For domains requiring CPU cache flush:
+ *   Walk also the last level page table in order to retrieve the physical
+ *   address of mapped DMA pages. Meanwhile, clear the leaf PTE and do the
+ *   TLB sync immediately.
+ * - The 'pte' argument is the *parent* PTE, pointing to the page that is to
+ *   be freed.
+ */
 static void dma_pte_list_pagetables(struct dmar_domain *domain,
+				    unsigned long iova_pfn,
 				    int level, struct dma_pte *pte,
 				    struct list_head *freelist)
 {
+	unsigned long level_nrpg = level_size(level);
 	struct page *pg;
 
 	pg = pfn_to_page(dma_pte_addr(pte) >> PAGE_SHIFT);
 	list_add_tail(&pg->lru, freelist);
 
-	if (level == 1)
+	if (!domain->require_clflush && level == 1)
 		return;
 
 	pte = page_address(pg);
 	do {
-		if (dma_pte_present(pte) && !dma_pte_superpage(pte))
-			dma_pte_list_pagetables(domain, level - 1, pte, freelist);
+		if (!dma_pte_present(pte))
+			goto next;
+
+		if (domain->require_clflush && dma_pte_leafpage(pte, level)) {
+			/* clear & flush leaf PTEs */
+			dma_clear_pte(pte);
+			__intel_iommu_tlb_sync(domain, iova_pfn, level_nrpg, 1);
+
+		} else if (!dma_pte_superpage(pte)) {
+			dma_pte_list_pagetables(domain, iova_pfn, level - 1, pte,
+						freelist);
+		}
+next:
 		pte++;
+		iova_pfn += level_nrpg;
 	} while (!first_pte_in_page(pte));
 }
 
@@ -979,6 +1004,7 @@ static void dma_pte_clear_level(struct dmar_domain *domain, int level,
 				struct list_head *freelist)
 {
 	struct dma_pte *first_pte = NULL, *last_pte = NULL;
+	unsigned long level_nrpg = level_size(level);
 
 	pfn = max(start_pfn, pfn);
 	pte = &pte[pfn_level_offset(pfn, level)];
@@ -991,13 +1017,28 @@ static void dma_pte_clear_level(struct dmar_domain *domain, int level,
 
 		/* If range covers entire pagetable, free it */
 		if (start_pfn <= level_pfn &&
-		    last_pfn >= level_pfn + level_size(level) - 1) {
-			/* These suborbinate page tables are going away entirely. Don't
-			   bother to clear them; we're just going to *free* them. */
+		    last_pfn >= level_pfn + level_nrpg - 1) {
+			bool is_leaf = dma_pte_leafpage(pte, level);
+
+			/*
+			 * These suborbinate page tables are going away entirely.
+			 * Don't bother to clear them (unless for require_clflush
+			 * domains); we're just going to *free* them.
+			 */
 			if (level > 1 && !dma_pte_superpage(pte))
-				dma_pte_list_pagetables(domain, level - 1, pte, freelist);
+				dma_pte_list_pagetables(domain, level_pfn,
+							level - 1, pte, freelist);
 
 			dma_clear_pte(pte);
+
+			/*
+			 * Do TLB flush immediately after clearing leaf PTEs
+			 * for require_clflush domains.
+			 */
+			if (domain->require_clflush && is_leaf)
+				__intel_iommu_tlb_sync(domain, level_pfn,
+						       level_nrpg, 1);
+
 			if (!first_pte)
 				first_pte = pte;
 			last_pte = pte;
@@ -1009,7 +1050,7 @@ static void dma_pte_clear_level(struct dmar_domain *domain, int level,
 					    freelist);
 		}
 next:
-		pfn = level_pfn + level_size(level);
+		pfn = level_pfn + level_nrpg;
 	} while (!first_pte_in_page(++pte) && pfn <= last_pfn);
 
 	if (first_pte)
@@ -4156,24 +4197,39 @@ static size_t intel_iommu_unmap_pages(struct iommu_domain *domain,
 	return intel_iommu_unmap(domain, iova, size, gather);
 }
 
+static void __intel_iommu_tlb_sync(struct dmar_domain *dmar_domain,
+				   unsigned long iova_pfn,
+				   unsigned long iova_nrpages, int ih)
+{
+	struct iommu_domain_info *info;
+	unsigned long i;
+
+	xa_for_each(&dmar_domain->iommu_array, i, info)
+		iommu_flush_iotlb_psi(info->iommu, dmar_domain,	iova_pfn,
+				      iova_nrpages, ih, 0);
+}
+
 static void intel_iommu_tlb_sync(struct iommu_domain *domain,
 				 struct iommu_iotlb_gather *gather)
 {
 	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
 	unsigned long iova_pfn = IOVA_PFN(gather->start);
 	size_t size = gather->end - gather->start;
-	struct iommu_domain_info *info;
 	unsigned long start_pfn;
 	unsigned long nrpages;
-	unsigned long i;
+
+	/*
+	 * require_clflush domain has flushed IOTLB for updating leaf PTEs at
+	 * unmap phase, so skip IOTLB flush if non-leaf PTEs are not changed.
+	 */
+	if (dmar_domain->require_clflush && list_empty(&gather->freelist))
+		return;
 
 	nrpages = aligned_nrpages(gather->start, size);
 	start_pfn = mm_to_dma_pfn_start(iova_pfn);
 
-	xa_for_each(&dmar_domain->iommu_array, i, info)
-		iommu_flush_iotlb_psi(info->iommu, dmar_domain,
-				      start_pfn, nrpages,
-				      list_empty(&gather->freelist), 0);
+	__intel_iommu_tlb_sync(dmar_domain, start_pfn, nrpages,
+			       list_empty(&gather->freelist));
 
 	if (dmar_domain->nested_parent)
 		parent_domain_flush(dmar_domain, start_pfn, nrpages,

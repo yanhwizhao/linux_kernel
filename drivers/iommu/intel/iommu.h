@@ -844,6 +844,11 @@ static inline bool dma_pte_superpage(struct dma_pte *pte)
 	return (pte->val & DMA_PTE_LARGE_PAGE);
 }
 
+static inline bool dma_pte_leafpage(struct dma_pte *pte, int level)
+{
+	return level == 1 || dma_pte_superpage(pte);
+}
+
 static inline bool first_pte_in_page(struct dma_pte *pte)
 {
 	return IS_ALIGNED((unsigned long)pte, VTD_PAGE_SIZE);
