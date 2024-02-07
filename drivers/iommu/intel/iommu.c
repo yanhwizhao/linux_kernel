@@ -71,6 +71,7 @@ static int force_on = 0;
 static int intel_iommu_tboot_noforce;
 static int no_platform_optin;
 
+static void intel_iommu_flush_phys(unsigned long phys_addr, unsigned long size);
 static void __intel_iommu_tlb_sync(struct dmar_domain *domain,
 				   unsigned long iova_pfn,
 				   unsigned long iova_nrpages, int ih);
@@ -960,7 +961,8 @@ static void dma_pte_free_pagetable(struct dmar_domain *domain,
  * - For domains requiring CPU cache flush:
  *   Walk also the last level page table in order to retrieve the physical
  *   address of mapped DMA pages. Meanwhile, clear the leaf PTE and do the
- *   TLB sync immediately.
+ *   TLB sync immediately. This is because CPU cache flush must be done after
+ *   IOTLB is flushed, i.e. when the memory is inaccessible to noncoherent DMAs.
  * - The 'pte' argument is the *parent* PTE, pointing to the page that is to
  *   be freed.
  */
@@ -984,9 +986,12 @@ static void dma_pte_list_pagetables(struct dmar_domain *domain,
 			goto next;
 
 		if (domain->require_clflush && dma_pte_leafpage(pte, level)) {
+			unsigned long pa = dma_pte_addr(pte);
+
 			/* clear & flush leaf PTEs */
 			dma_clear_pte(pte);
 			__intel_iommu_tlb_sync(domain, iova_pfn, level_nrpg, 1);
+			intel_iommu_flush_phys(pa, level_nrpg << VTD_PAGE_SHIFT);
 
 		} else if (!dma_pte_superpage(pte)) {
 			dma_pte_list_pagetables(domain, iova_pfn, level - 1, pte,
@@ -1018,6 +1023,7 @@ static void dma_pte_clear_level(struct dmar_domain *domain, int level,
 		/* If range covers entire pagetable, free it */
 		if (start_pfn <= level_pfn &&
 		    last_pfn >= level_pfn + level_nrpg - 1) {
+			unsigned long pa = dma_pte_addr(pte);
 			bool is_leaf = dma_pte_leafpage(pte, level);
 
 			/*
@@ -1035,9 +1041,11 @@ static void dma_pte_clear_level(struct dmar_domain *domain, int level,
 			 * Do TLB flush immediately after clearing leaf PTEs
 			 * for require_clflush domains.
 			 */
-			if (domain->require_clflush && is_leaf)
+			if (domain->require_clflush && is_leaf) {
 				__intel_iommu_tlb_sync(domain, level_pfn,
 						       level_nrpg, 1);
+				intel_iommu_flush_phys(pa, level_nrpg << VTD_PAGE_SHIFT);
+			}
 
 			if (!first_pte)
 				first_pte = pte;
@@ -4148,6 +4156,10 @@ static int intel_iommu_map(struct iommu_domain *domain,
 	/* Round up size to next multiple of PAGE_SIZE, if it and
 	   the low bits of hpa would take us onto the next page */
 	size = aligned_nrpages(hpa, size);
+
+	if (dmar_domain->require_clflush)
+		intel_iommu_flush_phys(hpa, size << VTD_PAGE_SHIFT);
+
 	return __domain_mapping(dmar_domain, iova >> VTD_PAGE_SHIFT,
 				hpa >> VTD_PAGE_SHIFT, size, prot, gfp);
 }
@@ -4276,6 +4288,56 @@ static phys_addr_t intel_iommu_iova_to_phys(struct iommu_domain *domain,
 						VTD_PAGE_SHIFT) - 1));
 
 	return phys;
+}
+
+static void intel_iommu_flush_ram(unsigned long pfn)
+{
+	/*
+	 * kmap() will reuse mapping in low memory if CONFIG_HIGHMEM is not
+	 * enabled. However, reserved pages do not always have mapping in low
+	 * memory.
+	 */
+	bool kmapable = pfn_valid(pfn) && !PageReserved(pfn_to_page(pfn));
+	const int size = boot_cpu_data.x86_clflush_size;
+	uint8_t *va;
+	unsigned int i;
+
+	if (kmapable)
+		va = kmap_local_pfn(pfn);
+	else
+		va = memremap(pfn << PAGE_SHIFT, PAGE_SIZE, MEMREMAP_WB);
+
+	for (i = 0; i < PAGE_SIZE; i += size)
+		clflushopt(va + i);
+
+	if (kmapable)
+		kunmap_local(va);
+	else
+		memunmap(va);
+}
+
+/*
+ * Flush non-MMIO physical memory.
+ * @phys_addr: physical address of memory to be cache flushed.
+ * @size: size in bytes for the physical memory to be cache flushed.
+ */
+static void intel_iommu_flush_phys(unsigned long phys_addr, unsigned long size)
+{
+	unsigned long nrpages, pfn;
+	unsigned long i;
+
+	/* PFN of MM pages */
+	pfn = phys_addr >> PAGE_SHIFT;
+	/* number of MM pages aligned to MM page size */
+	nrpages = PAGE_ALIGN((phys_addr & ~PAGE_MASK) + size) >> PAGE_SHIFT;
+
+	mb(); /*Full memory barrier used before so that CLFLUSH is ordered*/
+	for (i = 0; i < nrpages; i++, pfn++) {
+		if (intel_iommu_is_mmio_pfn(pfn))
+			continue;
+		intel_iommu_flush_ram(pfn);
+	}
+	mb(); /*Also used after CLFLUSH so that all cache is flushed*/
 }
 
 static bool domain_support_force_snooping(struct dmar_domain *domain)
