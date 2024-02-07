@@ -602,7 +602,10 @@ struct dmar_domain {
 	u8 has_mappings:1;		/* Has mappings configured through
 					 * iommu_map() interface.
 					 */
-
+	u8 require_clflush:1;		/* Indicate CPU caches must be flushed
+					 * when mapping/unmapping a DMA page
+					 * to/from the domain
+					 */
 	spinlock_t lock;		/* Protect device tracking lists */
 	struct list_head devices;	/* all devices' list */
 	struct list_head dev_pasids;	/* all attached pasids */

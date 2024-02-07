@@ -1679,6 +1679,12 @@ static struct dmar_domain *alloc_domain(unsigned int type)
 	spin_lock_init(&domain->lock);
 	xa_init(&domain->iommu_array);
 
+	/*
+	 * UNMANAGED domain requires clflush if it does not force snoop.
+	 * For other type of domains, we rely on device drivers to handle
+	 * clflush properly.
+	 */
+	domain->require_clflush = (type == IOMMU_DOMAIN_UNMANAGED) ? true : false;
 	return domain;
 }
 
@@ -4245,6 +4251,7 @@ static bool intel_iommu_enforce_cache_coherency(struct iommu_domain *domain)
 
 	domain_set_force_snooping(dmar_domain);
 	dmar_domain->force_snooping = true;
+	dmar_domain->require_clflush = false;
 	spin_unlock_irqrestore(&dmar_domain->lock, flags);
 
 	return true;
